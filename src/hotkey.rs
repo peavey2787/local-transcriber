@@ -1,9 +1,9 @@
 //! Configurable global shortcut support for Linux X11 and supported Wayland
-//! desktops.
+//! desktops, plus live shortcut capture for the Settings window.
 
 use anyhow::{Context as AnyhowContext, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use eframe::egui::Context as EguiContext;
+use eframe::egui::{Context as EguiContext, Event as EguiEvent};
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use parking_lot::Mutex;
@@ -64,21 +64,16 @@ impl Hotkeys {
             Ok(requested) => match this.manager.register(requested) {
                 Ok(()) => {
                     this.registered = Some(requested);
-                    println!(
-                        "[local-stt] hotkey registered: {}",
-                        friendly_name(trimmed)
-                    );
+                    println!("[local-stt] hotkey registered: {}", friendly_name(trimmed));
                     None
                 }
                 Err(error) => {
-                    eprintln!(
-                        "[local-stt] could not register hotkey {trimmed:?}: {error}"
-                    );
+                    eprintln!("[local-stt] could not register hotkey {trimmed:?}: {error}");
                     Some(format!(
                         "The recording shortcut {} is already in use by another application or unavailable on this desktop.",
                         friendly_name(trimmed)
                     ))
-                },
+                }
             },
             Err(error) => Some(error.to_string()),
         };
@@ -112,7 +107,6 @@ impl Hotkeys {
         println!("[local-stt] hotkey changed to: {}", friendly_name(shortcut));
         Ok(())
     }
-
 
     /// Disables shortcut handling even if the desktop refuses to release the
     /// underlying registration. This keeps stale events from toggling audio.
@@ -154,24 +148,128 @@ fn parse(shortcut: &str) -> Result<HotKey> {
         .map_err(|error| anyhow::anyhow!("invalid hotkey {trimmed:?}: {error}"))
 }
 
+/// Live key-combination capture used by Settings. Each capture completes on
+/// one non-repeating main-key press and uses that event's current modifiers.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ShortcutCapture;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaptureOutcome {
+    Captured(String),
+    Unsupported(String),
+}
+
+impl ShortcutCapture {
+    pub fn reset(&mut self) {}
+
+    /// Feeds one egui keyboard event into the live shortcut recorder. Returns
+    /// a result only after a non-modifier key is pressed.
+    pub fn feed(&mut self, event: &EguiEvent) -> Option<CaptureOutcome> {
+        let EguiEvent::Key {
+            key,
+            physical_key,
+            pressed,
+            repeat,
+            modifiers,
+            ..
+        } = event
+        else {
+            return None;
+        };
+
+        if !*pressed || *repeat {
+            return None;
+        }
+
+        let key_name = format!("{:?}", physical_key.as_ref().unwrap_or(key));
+        let (main_key, implied_shift) = normalize_egui_key_name(&key_name);
+        let mut pieces = Vec::new();
+        if modifiers.ctrl {
+            pieces.push("control".to_string());
+        }
+        if modifiers.alt {
+            pieces.push("alt".to_string());
+        }
+        if modifiers.shift || implied_shift {
+            pieces.push("shift".to_string());
+        }
+        pieces.push(main_key);
+        let candidate = pieces.join("+");
+
+        match validate(&candidate) {
+            Ok(()) => Some(CaptureOutcome::Captured(candidate)),
+            Err(error) => Some(CaptureOutcome::Unsupported(format!(
+                "That key cannot be used as a global shortcut: {error}"
+            ))),
+        }
+    }
+}
+
+/// Converts egui's key names to the names accepted by global-hotkey. The
+/// physical key is used whenever eframe supplies one, so capture follows the
+/// actual keyboard key rather than the active character layout.
+fn normalize_egui_key_name(name: &str) -> (String, bool) {
+    if name.len() == 1 && name.as_bytes()[0].is_ascii_uppercase() {
+        return (format!("Key{name}"), false);
+    }
+    if let Some(digit) = name.strip_prefix("Num") {
+        if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() {
+            return (format!("Digit{digit}"), false);
+        }
+    }
+
+    match name {
+        "Backtick" => ("Backquote".into(), false),
+        "OpenBracket" => ("BracketLeft".into(), false),
+        "CloseBracket" => ("BracketRight".into(), false),
+        "Equals" => ("Equal".into(), false),
+        // When no physical key is available, translate shifted logical symbols
+        // back to their physical base key and preserve Shift explicitly.
+        "Colon" => ("Semicolon".into(), true),
+        "Questionmark" => ("Slash".into(), true),
+        "Exclamationmark" => ("Digit1".into(), true),
+        "Pipe" => ("Backslash".into(), true),
+        "OpenCurlyBracket" => ("BracketLeft".into(), true),
+        "CloseCurlyBracket" => ("BracketRight".into(), true),
+        "Plus" => ("Equal".into(), true),
+        _ => (name.to_string(), false),
+    }
+}
+
 pub fn friendly_name(shortcut: &str) -> String {
     let trimmed = shortcut.trim();
     if trimmed.is_empty() {
         return "No hotkey set".into();
     }
-    if trimmed.eq_ignore_ascii_case("Backquote") || trimmed == "`" {
-        return "Tilde / backquote key (` / ~)".into();
-    }
+
     trimmed
-        .replace("control", "Ctrl")
-        .replace("CONTROL", "Ctrl")
-        .replace("ctrl", "Ctrl")
-        .replace("shift", "Shift")
-        .replace("SHIFT", "Shift")
-        .replace("super", "Super")
-        .replace("SUPER", "Super")
-        .replace("alt", "Alt")
-        .replace("ALT", "Alt")
+        .split('+')
+        .map(|part| match part.trim().to_ascii_lowercase().as_str() {
+            "control" | "ctrl" => "Ctrl".to_string(),
+            "shift" => "Shift".to_string(),
+            "alt" | "option" => "Alt".to_string(),
+            "super" | "command" | "cmd" => "Super".to_string(),
+            _ => friendly_main_key(part.trim()),
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+fn friendly_main_key(key: &str) -> String {
+    if key.eq_ignore_ascii_case("Backquote") || key == "`" {
+        return "` / ~".into();
+    }
+    if let Some(letter) = key.strip_prefix("Key") {
+        if letter.len() == 1 && letter.as_bytes()[0].is_ascii_alphabetic() {
+            return letter.to_ascii_uppercase();
+        }
+    }
+    if let Some(digit) = key.strip_prefix("Digit") {
+        if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() {
+            return digit.to_string();
+        }
+    }
+    key.to_string()
 }
 
 #[cfg(test)]
@@ -185,11 +283,45 @@ mod tests {
 
     #[test]
     fn modified_key_parses() {
-        validate("ctrl+shift+Space").unwrap();
+        validate("control+shift+Space").unwrap();
     }
 
     #[test]
     fn empty_hotkey_has_clear_label() {
         assert_eq!(friendly_name(""), "No hotkey set");
+    }
+
+    #[test]
+    fn captured_names_are_human_readable() {
+        assert_eq!(friendly_name("control+shift+KeyR"), "Ctrl + Shift + R");
+        assert_eq!(friendly_name("Backquote"), "` / ~");
+    }
+
+    #[test]
+    fn egui_names_are_normalized_for_global_hotkey() {
+        assert_eq!(normalize_egui_key_name("A"), ("KeyA".into(), false));
+        assert_eq!(normalize_egui_key_name("Num7"), ("Digit7".into(), false));
+        assert_eq!(normalize_egui_key_name("Backtick"), ("Backquote".into(), false));
+        assert_eq!(normalize_egui_key_name("Plus"), ("Equal".into(), true));
+    }
+
+    #[test]
+    fn live_capture_uses_the_pressed_key_and_current_modifiers() {
+        let event = EguiEvent::Key {
+            key: eframe::egui::Key::R,
+            physical_key: Some(eframe::egui::Key::R),
+            pressed: true,
+            repeat: false,
+            modifiers: eframe::egui::Modifiers {
+                ctrl: true,
+                shift: true,
+                ..Default::default()
+            },
+        };
+        let mut capture = ShortcutCapture::default();
+        assert_eq!(
+            capture.feed(&event),
+            Some(CaptureOutcome::Captured("control+shift+KeyR".into()))
+        );
     }
 }

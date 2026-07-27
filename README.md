@@ -2,14 +2,7 @@
 
 Background speech-to-text powered by **NVIDIA Parakeet TDT 0.6B v3 INT8** through sherpa-onnx.
 
-Press the physical **` / ~ key** to start recording and press it again to stop. The transcription is copied to the clipboard. Optional **Ctrl+V auto-paste** can paste it directly into the application that was focused when recording began.
-
-The top-center visual overlay shows all important states:
-
-- checking, downloading, extracting, loading, and warming the model;
-- recording with a live microphone meter;
-- transcribing;
-- completion, clipboard status, and auto-paste failures.
+Press the physical **` / ~ key** by default to start recording and press it again to stop. The transcription is copied to the clipboard. Optional **Ctrl+V auto-paste** can paste it directly into the application that was focused when recording began.
 
 ## Linux install
 
@@ -25,36 +18,41 @@ The installer checks first. It asks for a sudo password only when required opera
 
 `scripts/run-linux.sh` only runs the already-built application; it never installs packages or requests root access.
 
-## Hotkey and auto-paste settings
+## Shortcut capture
 
 Open the tray menu and choose **Settings…**.
 
-The default shortcut is `Backquote`, meaning the physical key marked `` ` `` and `~`; Shift is not required. You can enter any shortcut accepted by the global-hotkey parser, including:
+The default shortcut is the physical backquote/tilde key, but the Settings window does not contain shortcut presets or a manually typed shortcut field. To change it:
 
-```text
-F8
-KeyR
-ctrl+shift+Space
-alt+KeyR
-super+F9
-shift+Backquote
-MediaPlayPause
-```
+1. Click **Set shortcut** or **Change shortcut**.
+2. Optionally hold Ctrl, Alt, or Shift.
+3. Press one main key.
+4. Click **Save and apply**.
 
-Modifiers must come before the main key. Changes are validated and applied immediately without restarting.
+The application captures the keyboard event, displays the combination it detected, validates it, and then registers it when settings are saved.
 
-If the configured shortcut is already owned by another application, local-stt no longer exits. It disables and clears that shortcut, keeps the tray application running, and displays a persistent message directing you to **Tray → Settings…**. A conflicting replacement selected in Settings is also left disabled rather than silently restoring an old key.
-
-The same Settings panel contains:
-
-- **Automatically paste the transcription with Ctrl+V**
-- **Show visual loading, recording, transcribing, and result notifications**
+If the configured shortcut is already owned by another application, local-stt does not exit. It disables and clears that shortcut, keeps the tray application running, and displays a persistent message directing you to **Tray → Settings…**. A conflicting replacement is also left disabled rather than silently restoring an old key.
 
 Settings are stored in `~/.local-stt/config.json`.
 
+## Auto-paste and visual notifications
+
+The Settings window contains **Automatically paste the transcription with Ctrl+V**. The result is always copied first.
+
+Successful auto-paste does not show the editable transcription textbox. When auto-paste is disabled, the result textbox can be edited; clicking or editing keeps it open until **Copy / Done** or `Esc` is used.
+
+Visual states are controlled independently, so any mixture can be enabled:
+
+- **Show model loading and ready notifications**
+- **Show recording notification and microphone meter**
+- **Show transcribing notification**
+- **Show transcription result and result/error notifications**
+
+Critical shortcut-conflict guidance remains visible because recording cannot work until another shortcut is selected.
+
 ## Linux desktop support
 
-Global shortcuts use X11 directly and the XDG GlobalShortcuts portal on supported Wayland desktops. The dependency used by this project supports X11 and Wayland. On Wayland desktops without the portal, running the app through XWayland remains a fallback.
+Global shortcuts use X11 directly and the XDG GlobalShortcuts portal on supported Wayland desktops. On Wayland desktops without portal support, running through XWayland remains a fallback.
 
 Auto-paste uses:
 
@@ -62,23 +60,21 @@ Auto-paste uses:
 - `wtype` on Wayland when available;
 - `ydotool` as a final optional fallback.
 
-Clipboard copy still succeeds when a compositor refuses synthetic Ctrl+V; the visual result explains the auto-paste failure instead of silently losing the transcription.
+Clipboard copy still succeeds when a compositor refuses synthetic Ctrl+V, and an optional compact result/error notice explains the failure.
 
 ## Usage
 
 | Action | Result |
 |---|---|
 | `` ` / ~ `` by default | Start recording |
-| Same hotkey again | Stop and transcribe |
-| Edit the result text | Keeps the result open until you finish |
-| **Copy / Done** | Copies the edited result to the clipboard and closes it |
-| `Esc` | Dismisses the result overlay without changing the clipboard again |
-| Tray → Settings… | Change hotkey, paste, and notification behavior |
+| Same captured shortcut again | Stop and transcribe |
+| Edit the result text with auto-paste off | Keeps the result open |
+| **Copy / Done** with auto-paste off | Copies the edited result and closes it |
+| `Esc` | Dismisses the result without changing the clipboard again |
+| Tray → Settings… | Capture a shortcut and configure paste/notification behavior |
 | Tray → Quit | Exit |
 
 While speaking, audio is decoded in live 10-second chunks, so stopping usually waits only for the final tail.
-
-A completed transcription closes automatically after several seconds only when you do not interact with it. Clicking or editing the text cancels that timer. The result editor remains open until **Copy / Done** or `Esc` is used.
 
 ## Model and privacy
 

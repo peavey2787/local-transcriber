@@ -7,16 +7,30 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default = "default_model")]
     pub model: String,
-    /// Global shortcut syntax accepted by global-hotkey, for example
-    /// "Backquote", "F8", or "ctrl+shift+Space".
+    /// Global shortcut syntax accepted by global-hotkey. This value is produced
+    /// by the Settings shortcut-capture control rather than typed manually.
     #[serde(default = "default_hotkey")]
     pub hotkey: String,
     /// Copy every result to the clipboard and then synthesize Ctrl+V.
     #[serde(default)]
     pub auto_paste: bool,
-    /// Show the top-center loading/listening/transcribing/result overlay.
+    /// Show model checking, downloading, extraction, loading, warmup, and ready
+    /// notifications.
     #[serde(default = "default_true")]
-    pub show_notifications: bool,
+    pub show_loading_notifications: bool,
+    /// Show the recording overlay and live microphone meter.
+    #[serde(default = "default_true")]
+    pub show_recording_notifications: bool,
+    /// Show the transcribing/processing overlay.
+    #[serde(default = "default_true")]
+    pub show_transcribing_notifications: bool,
+    /// Show editable transcription results and compact result/error notices.
+    #[serde(default = "default_true")]
+    pub show_result_notifications: bool,
+    /// Migration input for configurations written before notification controls
+    /// were separated. It is intentionally never written back to disk.
+    #[serde(default, rename = "show_notifications", skip_serializing)]
+    legacy_show_notifications: Option<bool>,
 }
 
 fn default_model() -> String {
@@ -38,8 +52,24 @@ impl Default for Config {
             model: default_model(),
             hotkey: default_hotkey(),
             auto_paste: false,
-            show_notifications: true,
+            show_loading_notifications: true,
+            show_recording_notifications: true,
+            show_transcribing_notifications: true,
+            show_result_notifications: true,
+            legacy_show_notifications: None,
         }
+    }
+}
+
+impl Config {
+    fn migrate_legacy_notifications(mut self) -> Self {
+        if let Some(enabled) = self.legacy_show_notifications.take() {
+            self.show_loading_notifications = enabled;
+            self.show_recording_notifications = enabled;
+            self.show_transcribing_notifications = enabled;
+            self.show_result_notifications = enabled;
+        }
+        self
     }
 }
 
@@ -60,8 +90,8 @@ pub fn models_dir() -> PathBuf {
 pub fn load() -> Config {
     let path = config_path();
     match fs::read_to_string(&path) {
-        Ok(s) => match serde_json::from_str(&s) {
-            Ok(config) => config,
+        Ok(s) => match serde_json::from_str::<Config>(&s) {
+            Ok(config) => config.migrate_legacy_notifications(),
             Err(error) => {
                 eprintln!(
                     "[local-stt] invalid config at {}: {error}; using defaults",
@@ -81,4 +111,32 @@ pub fn save(cfg: &Config) -> Result<()> {
     let s = serde_json::to_string_pretty(cfg)?;
     fs::write(&path, s).with_context(|| format!("write {}", path.display()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_notification_toggle_migrates_to_all_four_controls() {
+        let cfg: Config = serde_json::from_str(
+            r#"{"model":"parakeet-int8","hotkey":"Backquote","show_notifications":false}"#,
+        )
+        .unwrap();
+        let cfg = cfg.migrate_legacy_notifications();
+        assert!(!cfg.show_loading_notifications);
+        assert!(!cfg.show_recording_notifications);
+        assert!(!cfg.show_transcribing_notifications);
+        assert!(!cfg.show_result_notifications);
+    }
+
+    #[test]
+    fn new_config_does_not_serialize_the_legacy_toggle() {
+        let json = serde_json::to_string(&Config::default()).unwrap();
+        assert!(!json.contains("show_notifications"));
+        assert!(json.contains("show_loading_notifications"));
+        assert!(json.contains("show_recording_notifications"));
+        assert!(json.contains("show_transcribing_notifications"));
+        assert!(json.contains("show_result_notifications"));
+    }
 }

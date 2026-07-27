@@ -18,6 +18,10 @@ This source archive replaces the Windows-only application path with a Linux-firs
 - Interaction-aware result timeout: untouched results close automatically, while clicked or edited results remain open.
 - Correctly constrained overlay layout with a wider seven-bar microphone meter.
 - Expanded `.gitignore` coverage for Rust targets, packages, logs, temporary files, editor state, and crash/profiler output.
+- Auto-paste completion now bypasses the editable transcript popup; only compact failure or no-speech notices remain.
+- Replaced all shortcut presets and manual shortcut-string entry with live keyboard capture from a Set/Change shortcut button.
+- Added physical-key normalization and live Ctrl, Alt, and Shift combination capture.
+- Split visual notifications into independent loading, recording, transcribing, and result controls, including migration of the former single toggle.
 
 ## Removed
 

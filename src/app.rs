@@ -13,7 +13,9 @@ use std::time::Instant;
 use crate::asr::AsrEngine;
 use crate::audio::Recorder;
 use crate::config::{self, Config};
-use crate::hotkey::{friendly_name, validate, Hotkeys, UiWake};
+use crate::hotkey::{
+    friendly_name, validate, CaptureOutcome, Hotkeys, ShortcutCapture, UiWake,
+};
 use crate::overlay::{Overlay, OverlayAction, OverlayState, CARD_W};
 use crate::paste::PasteTarget;
 use crate::tray::{Tray, TrayAction};
@@ -22,7 +24,7 @@ use crate::util::SAMPLE_RATE;
 const LIVE_CHUNK_SECS: u32 = 10;
 const LIVE_CHUNK_SAMPLES: usize = (SAMPLE_RATE as usize) * (LIVE_CHUNK_SECS as usize);
 const SETTINGS_W: f32 = 650.0;
-const SETTINGS_H: f32 = 430.0;
+const SETTINGS_H: f32 = 610.0;
 
 enum WorkerMsg {
     EngineStatus(String),
@@ -87,8 +89,13 @@ pub struct LocalSttApp {
     settings_open: bool,
     settings_focus_pending: bool,
     settings_hotkey: String,
+    settings_capturing_hotkey: bool,
+    shortcut_capture: ShortcutCapture,
     settings_auto_paste: bool,
-    settings_notifications: bool,
+    settings_loading_notifications: bool,
+    settings_recording_notifications: bool,
+    settings_transcribing_notifications: bool,
+    settings_result_notifications: bool,
     settings_message: Option<(String, bool)>,
     hotkey_problem: Option<String>,
 }
@@ -143,7 +150,7 @@ impl LocalSttApp {
                 format!("{problem} Recording is disabled until a new shortcut is saved."),
                 false,
             );
-        } else if config.show_notifications {
+        } else if config.show_loading_notifications {
             overlay.show_loading(startup_status.clone());
         }
 
@@ -162,8 +169,13 @@ impl LocalSttApp {
             last_frame: Instant::now(),
             wake_installed: false,
             settings_hotkey: config.hotkey.clone(),
+            settings_capturing_hotkey: false,
+            shortcut_capture: ShortcutCapture::default(),
             settings_auto_paste: config.auto_paste,
-            settings_notifications: config.show_notifications,
+            settings_loading_notifications: config.show_loading_notifications,
+            settings_recording_notifications: config.show_recording_notifications,
+            settings_transcribing_notifications: config.show_transcribing_notifications,
+            settings_result_notifications: config.show_result_notifications,
             config,
             startup_status,
             paste_target: None,
@@ -225,8 +237,10 @@ impl LocalSttApp {
 
     fn toggle_record(&mut self) {
         if self.engine.is_none() {
-            if self.config.show_notifications {
+            if self.config.show_loading_notifications {
                 self.overlay.show_loading(self.startup_status.clone());
+            } else {
+                self.overlay.dismiss();
             }
             return;
         }
@@ -242,8 +256,10 @@ impl LocalSttApp {
             self.recording = true;
             self.session = Some(LiveSession::new());
             self.recorder.start();
-            if self.config.show_notifications {
+            if self.config.show_recording_notifications {
                 self.overlay.show_listening();
+            } else {
+                self.overlay.dismiss();
             }
             self.tray.set_tooltip("local-stt — recording…");
             println!("[local-stt] recording (live {LIVE_CHUNK_SECS}s chunks)");
@@ -260,8 +276,10 @@ impl LocalSttApp {
                 (id, expected)
             };
 
-            if self.config.show_notifications {
+            if self.config.show_transcribing_notifications {
                 self.overlay.show_processing();
+            } else {
+                self.overlay.dismiss();
             }
             self.tray.set_tooltip("local-stt — transcribing…");
             println!("[local-stt] stopped — expecting {expected} chunks");
@@ -288,33 +306,81 @@ impl LocalSttApp {
 
         let text = session.joined();
         let ok = !text.is_empty();
-        let footer = if ok {
+        let now = self.now();
+
+        if ok {
+            println!("[local-stt] result: {text}");
             match Clipboard::new().and_then(|mut clipboard| clipboard.set_text(&text)) {
                 Ok(()) if self.config.auto_paste => {
                     let target = self.paste_target.take().unwrap_or_default();
                     match target.paste_ctrl_v() {
-                        Ok(backend) => format!("Copied and pasted with Ctrl+V ({backend})"),
-                        Err(error) => format!("Copied; auto-paste failed: {error}"),
+                        Ok(backend) => {
+                            println!("[local-stt] auto-pasted with Ctrl+V ({backend})");
+                            // Auto-paste is intentionally a no-editor path. The user has
+                            // already chosen direct insertion, so do not cover the target
+                            // application with a transcript textbox they cannot use first.
+                            self.overlay.dismiss();
+                        }
+                        Err(error) => {
+                            let message = format!(
+                                "The transcription was copied, but auto-paste failed: {error}"
+                            );
+                            eprintln!("[local-stt] {message}");
+                            if self.config.show_result_notifications {
+                                self.overlay.show_notice(message, false, now, 8.0);
+                            } else {
+                                self.overlay.dismiss();
+                            }
+                        }
                     }
                 }
-                Ok(()) => "Copied to clipboard".into(),
-                Err(error) => format!("Clipboard error: {error}"),
+                Ok(()) => {
+                    if self.config.show_result_notifications {
+                        self.overlay
+                            .show_result(text, true, "Copied to clipboard", now);
+                    } else {
+                        self.overlay.dismiss();
+                    }
+                }
+                Err(error) if self.config.auto_paste => {
+                    let message = format!(
+                        "Could not copy the transcription, so auto-paste was not attempted: {error}"
+                    );
+                    eprintln!("[local-stt] {message}");
+                    if self.config.show_result_notifications {
+                        self.overlay.show_notice(message, false, now, 8.0);
+                    } else {
+                        self.overlay.dismiss();
+                    }
+                }
+                Err(error) => {
+                    let footer = format!("Clipboard error: {error}");
+                    if self.config.show_result_notifications {
+                        self.overlay.show_result(text, true, footer, now);
+                    } else {
+                        self.overlay.dismiss();
+                    }
+                }
             }
         } else {
-            "No speech was detected".into()
-        };
-
-        if ok {
-            println!("[local-stt] result: {text}");
-        } else {
             println!("[local-stt] nothing heard");
+            if self.config.show_result_notifications {
+                if self.config.auto_paste {
+                    self.overlay
+                        .show_notice("No speech was detected", false, now, 5.0);
+                } else {
+                    self.overlay.show_result(
+                        String::new(),
+                        false,
+                        "No speech was detected",
+                        now,
+                    );
+                }
+            } else {
+                self.overlay.dismiss();
+            }
         }
-        if self.config.show_notifications {
-            self.overlay
-                .show_result(text, ok, footer, self.now());
-        } else {
-            self.overlay.dismiss();
-        }
+
         self.tray.set_tooltip("local-stt — Parakeet ready");
         self.session = None;
         self.paste_target = None;
@@ -326,11 +392,13 @@ impl LocalSttApp {
                 WorkerMsg::EngineStatus(message) => {
                     self.startup_status = message.clone();
                     self.tray.set_tooltip(&format!("local-stt — {message}"));
-                    if self.config.show_notifications
+                    if self.config.show_loading_notifications
                         && !self.settings_open
                         && self.hotkey_problem.is_none()
                     {
                         self.overlay.show_loading(message);
+                    } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
+                        self.overlay.dismiss();
                     }
                 }
                 WorkerMsg::EngineReady(Ok(engine)) => {
@@ -349,7 +417,7 @@ impl LocalSttApp {
                             self.tray.set_tooltip(
                                 "local-stt — recording shortcut required; open Settings",
                             );
-                        } else if self.config.show_notifications {
+                        } else if self.config.show_loading_notifications {
                             self.overlay.show_notice(
                                 format!(
                                     "Parakeet ready — press {}",
@@ -359,19 +427,23 @@ impl LocalSttApp {
                                 self.now(),
                                 3.5,
                             );
+                        } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
+                            self.overlay.dismiss();
                         }
                     }
                 }
                 WorkerMsg::EngineReady(Err(error)) => {
                     self.startup_status = format!("Model load failed: {error}");
                     self.tray.set_tooltip("local-stt — model load failed");
-                    if self.config.show_notifications && !self.settings_open {
+                    if self.config.show_loading_notifications && !self.settings_open {
                         self.overlay.show_notice(
                             self.startup_status.clone(),
                             false,
                             self.now(),
                             12.0,
                         );
+                    } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
+                        self.overlay.dismiss();
                     }
                 }
                 WorkerMsg::ChunkDone { id, text } => {
@@ -387,7 +459,7 @@ impl LocalSttApp {
 
     fn open_settings(&mut self) {
         if self.recording || self.session.as_ref().is_some_and(|session| session.finishing) {
-            if self.config.show_notifications {
+            if self.config.show_result_notifications {
                 self.overlay.show_notice(
                     "Finish the current recording before opening Settings",
                     false,
@@ -399,8 +471,13 @@ impl LocalSttApp {
         }
 
         self.settings_hotkey = self.config.hotkey.clone();
+        self.settings_capturing_hotkey = false;
+        self.shortcut_capture.reset();
         self.settings_auto_paste = self.config.auto_paste;
-        self.settings_notifications = self.config.show_notifications;
+        self.settings_loading_notifications = self.config.show_loading_notifications;
+        self.settings_recording_notifications = self.config.show_recording_notifications;
+        self.settings_transcribing_notifications = self.config.show_transcribing_notifications;
+        self.settings_result_notifications = self.config.show_result_notifications;
         self.settings_message = self.hotkey_problem.as_ref().map(|problem| {
             (
                 format!("{problem} Choose a different shortcut and click Save and apply."),
@@ -445,7 +522,10 @@ impl LocalSttApp {
         self.hotkey_problem = None;
         self.config.hotkey = requested;
         self.config.auto_paste = self.settings_auto_paste;
-        self.config.show_notifications = self.settings_notifications;
+        self.config.show_loading_notifications = self.settings_loading_notifications;
+        self.config.show_recording_notifications = self.settings_recording_notifications;
+        self.config.show_transcribing_notifications = self.settings_transcribing_notifications;
+        self.config.show_result_notifications = self.settings_result_notifications;
         self.tray.set_hotkey_hint(&self.config.hotkey);
         match config::save(&self.config) {
             Ok(()) => {
@@ -462,9 +542,7 @@ impl LocalSttApp {
                     self.tray
                         .set_tooltip(&format!("local-stt — {}", self.startup_status));
                 }
-                if !self.config.show_notifications {
-                    self.overlay.dismiss();
-                }
+                self.reconcile_overlay_preferences();
             }
             Err(error) => {
                 self.settings_message = Some((format!("Could not save settings: {error:#}"), false));
@@ -472,7 +550,59 @@ impl LocalSttApp {
         }
     }
 
+    fn reconcile_overlay_preferences(&mut self) {
+        let allowed = match &self.overlay.state {
+            OverlayState::Hidden => true,
+            OverlayState::Loading { .. } => self.config.show_loading_notifications,
+            OverlayState::Listening => self.config.show_recording_notifications,
+            OverlayState::Processing => self.config.show_transcribing_notifications,
+            OverlayState::Result { .. } => self.config.show_result_notifications,
+            OverlayState::Notice { .. } => {
+                self.hotkey_problem.is_some()
+                    || self.config.show_loading_notifications
+                    || self.config.show_result_notifications
+            }
+        };
+        if !allowed {
+            self.overlay.dismiss();
+        }
+    }
+
+    fn poll_shortcut_capture(&mut self, ctx: &egui::Context) -> bool {
+        if !self.settings_capturing_hotkey {
+            return false;
+        }
+
+        for event in ctx.input(|input| input.events.clone()) {
+            match self.shortcut_capture.feed(&event) {
+                Some(CaptureOutcome::Captured(shortcut)) => {
+                    self.settings_hotkey = shortcut;
+                    self.settings_capturing_hotkey = false;
+                    self.shortcut_capture.reset();
+                    self.settings_message = Some((
+                        format!(
+                            "Captured {}. Click Save and apply to activate it.",
+                            friendly_name(&self.settings_hotkey)
+                        ),
+                        true,
+                    ));
+                    return true;
+                }
+                Some(CaptureOutcome::Unsupported(message)) => {
+                    self.shortcut_capture.reset();
+                    self.settings_message = Some((
+                        format!("{message} Press another key or combination."),
+                        false,
+                    ));
+                }
+                None => {}
+            }
+        }
+        false
+    }
+
     fn draw_settings(&mut self, ctx: &egui::Context) {
+        let captured_this_frame = self.poll_shortcut_capture(ctx);
         let mut apply = false;
         let mut close = false;
         egui::CentralPanel::default()
@@ -494,54 +624,106 @@ impl LocalSttApp {
 
                 ui.label(RichText::new("Recording hotkey").strong());
                 ui.label(
-                    "Use one key, or modifiers followed by one key. The default Backquote is the physical ` / ~ key.",
+                    "Click Set shortcut, then press the exact key or key combination you want to use.",
                 );
-                ui.add_space(6.0);
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.settings_hotkey)
-                        .hint_text("Backquote, F8, ctrl+shift+Space")
-                        .desired_width(f32::INFINITY),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Presets:");
-                    if ui.button("Tilde / backquote").clicked() {
-                        self.settings_hotkey = "Backquote".into();
-                    }
-                    if ui.button("F8").clicked() {
-                        self.settings_hotkey = "F8".into();
-                    }
-                    if ui.button("Ctrl+Shift+Space").clicked() {
-                        self.settings_hotkey = "ctrl+shift+Space".into();
-                    }
-                });
+                ui.add_space(8.0);
+
+                egui::Frame::NONE
+                    .fill(Color32::from_rgb(23, 25, 25))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(54, 58, 58)))
+                    .corner_radius(egui::CornerRadius::same(9))
+                    .inner_margin(12.0)
+                    .show(ui, |ui| {
+                        if self.settings_capturing_hotkey {
+                            ui.label(
+                                RichText::new("Press your shortcut now…")
+                                    .strong()
+                                    .color(Color32::from_rgb(67, 196, 214)),
+                            );
+                            ui.label(
+                                RichText::new(
+                                    "Optionally hold Ctrl, Alt, or Shift, then press one main key.",
+                                )
+                                .small()
+                                .weak(),
+                            );
+                            ui.add_space(6.0);
+                            if ui.button("Cancel capture").clicked() {
+                                self.settings_capturing_hotkey = false;
+                                self.shortcut_capture.reset();
+                                self.settings_message = None;
+                            }
+                        } else {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new("Current shortcut").small().weak());
+                                    ui.label(
+                                        RichText::new(friendly_name(&self.settings_hotkey))
+                                            .size(17.0)
+                                            .strong(),
+                                    );
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let label = if self.settings_hotkey.trim().is_empty() {
+                                            "Set shortcut"
+                                        } else {
+                                            "Change shortcut"
+                                        };
+                                        if ui.button(label).clicked() {
+                                            self.settings_capturing_hotkey = true;
+                                            self.shortcut_capture.reset();
+                                            self.settings_message = None;
+                                        }
+                                    },
+                                );
+                            });
+                        }
+                    });
                 ui.label(
                     RichText::new(
-                        "Examples: KeyR, alt+KeyR, super+F9, shift+Backquote, MediaPlayPause",
+                        "The shortcut is captured from the keyboard; there are no preset choices or manually typed shortcut strings.",
                     )
                     .small()
                     .weak(),
                 );
 
-                ui.add_space(18.0);
+                ui.add_space(16.0);
                 ui.checkbox(
                     &mut self.settings_auto_paste,
                     "Automatically paste the transcription with Ctrl+V",
                 );
                 ui.label(
                     RichText::new(
-                        "The result is always copied first. Auto-paste uses xdotool on X11 and wtype/ydotool on Wayland.",
+                        "The result is copied first. A successful auto-paste does not show the editable result textbox.",
                     )
                     .small()
                     .weak(),
                 );
 
-                ui.add_space(12.0);
+                ui.add_space(16.0);
+                ui.label(RichText::new("Visual notifications").strong());
+                ui.label("Choose any combination of status windows you want to see.");
+                ui.add_space(6.0);
                 ui.checkbox(
-                    &mut self.settings_notifications,
-                    "Show visual loading, recording, transcribing, and result notifications",
+                    &mut self.settings_loading_notifications,
+                    "Show model loading and ready notifications",
+                );
+                ui.checkbox(
+                    &mut self.settings_recording_notifications,
+                    "Show recording notification and microphone meter",
+                );
+                ui.checkbox(
+                    &mut self.settings_transcribing_notifications,
+                    "Show transcribing notification",
+                );
+                ui.checkbox(
+                    &mut self.settings_result_notifications,
+                    "Show transcription result and result/error notifications",
                 );
 
-                ui.add_space(18.0);
+                ui.add_space(16.0);
                 if let Some((message, ok)) = &self.settings_message {
                     ui.label(
                         RichText::new(message)
@@ -553,7 +735,13 @@ impl LocalSttApp {
                     );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Save and apply").clicked() {
+                    if ui
+                        .add_enabled(
+                            !self.settings_capturing_hotkey,
+                            egui::Button::new("Save and apply"),
+                        )
+                        .clicked()
+                    {
                         apply = true;
                     }
                     if ui.button("Cancel").clicked() {
@@ -565,16 +753,23 @@ impl LocalSttApp {
         if apply {
             self.apply_settings();
         }
-        if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        let escape_closes = !self.settings_capturing_hotkey
+            && !captured_this_frame
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if close || escape_closes {
             self.settings_open = false;
             self.settings_focus_pending = false;
+            self.settings_capturing_hotkey = false;
+            self.shortcut_capture.reset();
             if let Some(problem) = &self.hotkey_problem {
                 self.overlay.show_persistent_notice(
                     format!("{problem} Open the tray menu → Settings to choose another shortcut."),
                     false,
                 );
-            } else if self.config.show_notifications && self.engine.is_none() {
+            } else if self.config.show_loading_notifications && self.engine.is_none() {
                 self.overlay.show_loading(self.startup_status.clone());
+            } else {
+                self.overlay.dismiss();
             }
         }
     }

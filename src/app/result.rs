@@ -20,8 +20,13 @@ impl LocalSttApp {
             Ok(()) if self.config.auto_paste => self.finish_auto_paste(now),
             Ok(()) => {
                 if self.config.show_result_notifications {
-                    self.overlay
-                        .show_result(text, true, "Copied to clipboard", now);
+                    self.overlay.show_result(
+                        text,
+                        true,
+                        "Copied to clipboard",
+                        now,
+                        self.config.notification_seconds(),
+                    );
                 } else {
                     self.overlay.dismiss();
                 }
@@ -41,6 +46,7 @@ impl LocalSttApp {
                         true,
                         format!("Clipboard error: {error}"),
                         now,
+                        self.config.notification_seconds(),
                     );
                 } else {
                     self.overlay.dismiss();
@@ -70,7 +76,7 @@ impl LocalSttApp {
                 format!("{summary} Nothing was pasted."),
                 false,
                 now,
-                10.0,
+                self.config.notification_seconds(),
             );
         } else {
             self.overlay.show_result(
@@ -78,6 +84,7 @@ impl LocalSttApp {
                 true,
                 format!("Partial transcription — {summary} Review it, then click Copy / Done"),
                 now,
+                self.config.notification_seconds(),
             );
         }
     }
@@ -92,7 +99,7 @@ impl LocalSttApp {
                 format!("Could not update the clipboard: {error}"),
                 false,
                 self.now(),
-                8.0,
+                self.config.notification_seconds(),
             ),
         }
     }
@@ -120,17 +127,33 @@ impl LocalSttApp {
         }
         if self.config.auto_paste {
             self.overlay
-                .show_notice("No speech was detected", false, now, 5.0);
+                .show_notice(
+                    "No speech was detected",
+                    false,
+                    now,
+                    self.config.notification_seconds(),
+                );
         } else {
             self.overlay
-                .show_result(String::new(), false, "No speech was detected", now);
+                .show_result(
+                    String::new(),
+                    false,
+                    "No speech was detected",
+                    now,
+                    self.config.notification_seconds(),
+                );
         }
     }
 
     fn show_result_error(&mut self, message: String, now: f64) {
         log::error!("result delivery failed: {message}");
         if self.config.show_result_notifications {
-            self.overlay.show_notice(message, false, now, 8.0);
+            self.overlay.show_notice(
+                message,
+                false,
+                now,
+                self.config.notification_seconds(),
+            );
         } else {
             self.overlay.dismiss();
         }

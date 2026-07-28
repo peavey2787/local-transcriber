@@ -154,7 +154,12 @@ impl LocalSttApp {
         self.recording = false;
         let message = format!("Could not start microphone recording: {error:#}");
         eprintln!("[local-stt] {message}");
-        self.overlay.show_notice(message, false, self.now(), 8.0);
+        self.overlay.show_notice(
+            message,
+            false,
+            self.now(),
+            self.config.notification_seconds(),
+        );
         self.tray.set_tooltip("local-stt — microphone unavailable");
     }
 
@@ -263,7 +268,7 @@ impl LocalSttApp {
                 ),
                 true,
                 self.now(),
-                3.5,
+                self.config.notification_seconds(),
             );
         } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
             self.overlay.dismiss();
@@ -275,7 +280,12 @@ impl LocalSttApp {
         self.tray.set_tooltip("local-stt — model load failed");
         if self.config.show_loading_notifications && !self.settings.open {
             self.overlay
-                .show_notice(self.startup_status.clone(), false, self.now(), 12.0);
+                .show_notice(
+                    self.startup_status.clone(),
+                    false,
+                    self.now(),
+                    self.config.notification_seconds(),
+                );
         } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
             self.overlay.dismiss();
         }

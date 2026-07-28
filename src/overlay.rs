@@ -72,7 +72,13 @@ impl Overlay {
         self.dismiss_at = None;
     }
 
-    pub fn show_notice(&mut self, message: impl Into<String>, ok: bool, now: f64, seconds: f64) {
+    pub fn show_notice(
+        &mut self,
+        message: impl Into<String>,
+        ok: bool,
+        now: f64,
+        seconds: f64,
+    ) {
         self.state = OverlayState::Notice {
             message: message.into(),
             ok,
@@ -94,6 +100,7 @@ impl Overlay {
         ok: bool,
         footer: impl Into<String>,
         now: f64,
+        seconds: f64,
     ) {
         self.state = OverlayState::Result {
             text,
@@ -101,7 +108,7 @@ impl Overlay {
             footer: footer.into(),
             interacted: false,
         };
-        self.dismiss_at = Some(now + 6.0);
+        self.dismiss_at = Some(now + seconds);
     }
 
     pub fn dismiss(&mut self) {
@@ -315,15 +322,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn untouched_result_auto_dismisses() {
+    fn untouched_result_uses_supplied_duration() {
         let mut overlay = Overlay::default();
         overlay.show_result(
             "hello".into(),
             true,
             "Copied to clipboard",
             10.0,
+            3.0,
         );
-        overlay.tick(16.1, 0.016);
+        overlay.tick(13.1, 0.016);
         assert!(matches!(overlay.state, OverlayState::Hidden));
     }
 
@@ -335,6 +343,7 @@ mod tests {
             true,
             "Copied to clipboard",
             10.0,
+            6.0,
         );
         if let OverlayState::Result { interacted, .. } = &mut overlay.state {
             *interacted = true;

@@ -27,17 +27,18 @@ The default shortcut is the physical backquote/tilde key, but the Settings windo
 1. Click **Set shortcut** or **Change shortcut**.
 2. Optionally hold Ctrl, Alt, or Shift.
 3. Press one main key.
-4. Click **Save and apply**.
 
-The application captures the keyboard event, displays the combination it detected, validates it, and then registers it when settings are saved.
+The application captures the keyboard event, validates the combination, registers it immediately, and saves it automatically. Every other Settings control is also persisted as soon as it changes; there is no Save or Apply button.
 
 If the configured shortcut is already owned by another application, local-stt does not exit. It disables and clears that shortcut, keeps the tray application running, and displays a persistent message directing you to **Tray → Settings…**. A conflicting replacement is also left disabled rather than silently restoring an old key.
 
 Settings are stored in `~/.local-stt/config.json`.
 
-## Auto-paste and visual notifications
+## Recording device, auto-paste, and visual notifications
 
-The Settings window contains **Automatically paste the transcription with Ctrl+V**. The result is always copied first.
+The **Recording device** drop-down lists the currently available input devices plus **System default**. Selecting a device rebuilds the idle recorder immediately and saves that choice automatically. If a saved device is unavailable at startup, local-stt safely falls back to the system default.
+
+The Settings window also contains **Automatically paste the transcription with Ctrl+V**. The result is always copied first.
 
 Successful auto-paste does not show the editable transcription textbox. When auto-paste is disabled, the result textbox can be edited; clicking or editing keeps it open until **Copy / Done** or `Esc` is used.
 
@@ -47,6 +48,8 @@ Visual states are controlled independently, so any mixture can be enabled:
 - **Show recording notification and microphone meter**
 - **Show transcribing notification**
 - **Show transcription result and result/error notifications**
+
+The **Temporary notification duration** control accepts 1–60 seconds. It controls temporary notices and untouched transcription results; recording, loading, and transcribing indicators remain visible for the duration of their active operation.
 
 Critical shortcut-conflict guidance remains visible because recording cannot work until another shortcut is selected.
 
@@ -71,7 +74,7 @@ Clipboard copy still succeeds when a compositor refuses synthetic Ctrl+V, and an
 | Edit the result text with auto-paste off | Keeps the result open |
 | **Copy / Done** with auto-paste off | Copies the edited result and closes it |
 | `Esc` | Dismisses the result without changing the clipboard again |
-| Tray → Settings… | Capture a shortcut and configure paste/notification behavior |
+| Tray → Settings… | Select a microphone and configure shortcut, paste, and notification behavior |
 | Tray → Quit | Exit |
 
 While speaking, audio is decoded in live 10-second chunks, so stopping usually waits only for the final tail.
@@ -93,8 +96,10 @@ No microphone input stream exists while the app is idle. The stream is created o
 ## Architecture and code-quality checks
 
 `src/app.rs` is a thin facade. The eframe composition root, recording/session
-control, bounded transcription worker, result delivery, settings, and viewport
-placement live in focused modules under `src/app/`, while single-instance
+control, bounded transcription worker, result delivery, settings state,
+settings application, settings UI, and viewport placement live in focused
+modules under `src/app/`. Audio device discovery, callback processing, and
+recorder lifecycle are separated under `src/audio/`, while single-instance
 ownership lives in `src/instance_lock.rs`.
 
 After installation, run the complete offline quality gate with:
@@ -104,8 +109,7 @@ After installation, run the complete offline quality gate with:
 ```
 
 It checks formatting, locked metadata, Clippy with warnings denied, all tests,
-and the release build without permitting network access. See `CODE-AUDIT.md` for
-the detailed responsibility, duplication, complexity, and deprecation review.
+and the release build without permitting network access.
 
 ## Build and package manually
 
@@ -117,6 +121,6 @@ SHERPA_ONNX_LIB_DIR="$PWD/.native/lib" cargo build --release --locked
 
 The package is written to `dist/local-stt-linux-x86_64.tar.gz`.
 
-`Cargo.lock` is committed and every installer/CI build uses `--locked`. The native Sherpa/ONNX release archive is downloaded by `scripts/prepare-sherpa-runtime.sh`, checked against a fixed SHA-256 before extraction, and supplied through `SHERPA_ONNX_LIB_DIR` so the dependency build does not perform its own native-library download.
+`Cargo.lock` is committed and installer and documented local builds use `--locked`. The native Sherpa/ONNX release archive is downloaded by `scripts/prepare-sherpa-runtime.sh`, checked against a fixed SHA-256 before extraction, and supplied through `SHERPA_ONNX_LIB_DIR` so the dependency build does not perform its own native-library download.
 
 See `SECURITY.md` for the complete microphone, download-integrity, dependency-lock, and network-boundary description.

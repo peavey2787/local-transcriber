@@ -15,7 +15,6 @@ This source archive replaces the Windows-only application path with a Linux-firs
 - Linux GTK tray event integration.
 - Debian/Ubuntu/Devuan/Mint install script that checks dependencies before requesting root access.
 - Run-only launcher and Linux release packager.
-- Linux GitHub release workflow.
 - Nonfatal hotkey-conflict handling that clears the unavailable shortcut and keeps the tray app open for reconfiguration.
 - Editable transcription results with a Copy / Done action that writes the edited text back to the clipboard.
 - Interaction-aware result timeout: untouched results close automatically, while clicked or edited results remain open.
@@ -24,7 +23,11 @@ This source archive replaces the Windows-only application path with a Linux-firs
 - Auto-paste completion now bypasses the editable transcript popup; only compact failure or no-speech notices remain.
 - Replaced all shortcut presets and manual shortcut-string entry with live keyboard capture from a Set/Change shortcut button.
 - Added physical-key normalization and live Ctrl, Alt, and Shift combination capture.
-- Split visual notifications into independent loading, recording, transcribing, and result controls, including migration of the former single toggle.
+- Split visual notifications into independent loading, recording, transcribing, and result controls.
+- Added an automatically persisted recording-device drop-down with a system-default option and duplicate-device disambiguation.
+- Added a 1–60 second temporary notification-duration setting and removed hard-coded notice/result timeouts.
+- Removed the Save/Apply workflow; every settings change now validates, applies, and persists immediately.
+- Split microphone discovery, callback processing, recorder lifecycle, settings state, settings behavior, and settings UI into focused SRP modules.
 
 - Closed microphone lifecycle: no CPAL input stream exists while idle; it is created only for active recording and dropped before transcription.
 - Removed successful transcript contents from terminal and application logs; only non-content completion metadata is logged.
@@ -39,7 +42,7 @@ This source archive replaces the Windows-only application path with a Linux-firs
 - Replaced thread-per-chunk transcription with one bounded recognizer worker and explicit chunk errors.
 - Replaced the fixed microphone callback sleep with observed active-callback synchronization.
 - Removed duplicate paste-backend process logic and direct shell-based executable discovery.
-- Added `scripts/audit-linux.sh`, full CI formatting/Clippy/test gates, and `CODE-AUDIT.md`.
+- Added `scripts/audit-linux.sh` for formatting, locked metadata, Clippy, tests, and release-build checks.
 - Compiled the byte-oriented SHA-256 test helper only in tests, eliminating its release dead-code warning.
 - Filtered only the exact known AppIndicator deprecation warning while documenting the remaining tray-backend migration.
 
@@ -59,7 +62,6 @@ This source archive replaces the Windows-only application path with a Linux-firs
 
 - All shell scripts pass `bash -n` parsing.
 - Cargo manifest parses as TOML.
-- GitHub Actions workflow parses as YAML.
 - Rust source delimiters and the modified code paths were statically reviewed.
 
-The installer and release workflow both replay the committed dependency lock and use only the SHA-256-authenticated native runtime prepared by `scripts/prepare-sherpa-runtime.sh`.
+The installer and local audit replay the committed dependency lock and use only the SHA-256-authenticated native runtime prepared by `scripts/prepare-sherpa-runtime.sh`.

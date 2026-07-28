@@ -1,0 +1,9 @@
+/target/
+/.native/
+/dist/
+*.log
+*.part
+*.profraw
+*.profdata
+core
+core.*

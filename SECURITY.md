@@ -32,8 +32,8 @@ The native Sherpa/ONNX archive is pinned to:
 - SHA-256: `18887dc13c7d313d0e0f6c164ed31715c27c1c2c4f71acd7c0147dc84cf02514`
 
 `scripts/prepare-sherpa-runtime.sh` rejects any archive whose digest differs
-before extraction. `.cargo/config.toml` supplies the verified project-local runtime as the default,
-while installer and CI builds export its absolute path. This prevents the
+before extraction. The installer, local audit, and documented manual build
+export the verified project-local runtime's absolute path. This prevents the
 dependency build script from performing its own native-runtime download.
 
 The Parakeet model archive is pinned to:

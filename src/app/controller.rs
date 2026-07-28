@@ -39,7 +39,7 @@ pub struct LocalSttApp {
 }
 
 impl LocalSttApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, mut config: Config) -> Result<Self> {
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>, mut config: Config) -> Result<Self> {
         let mut style = (*cc.egui_ctx.style()).clone();
         style.visuals = egui::Visuals::dark();
         cc.egui_ctx.set_style(style);
@@ -60,7 +60,18 @@ impl LocalSttApp {
             }
         }
         let tray = Tray::new(&config.hotkey)?;
-        let recorder = Recorder::new()?;
+        let recorder = match Recorder::new(config.recording_device.as_ref()) {
+            Ok(recorder) => recorder,
+            Err(error) if config.recording_device.is_some() => {
+                eprintln!(
+                    "[local-stt] configured recording device is unavailable ({error:#}); using the system default"
+                );
+                config.recording_device = None;
+                config::save(&config)?;
+                Recorder::new(None)?
+            }
+            Err(error) => return Err(error),
+        };
         let transcription = TranscriptionWorker::spawn(ui_wake.clone())?;
         let mut overlay = Overlay::default();
         let startup_status = "Starting local speech recognition…".to_string();

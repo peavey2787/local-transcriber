@@ -10,4 +10,4 @@ mod settings;
 mod transcription;
 mod viewport;
 
-pub use controller::LocalSttApp;
+pub(crate) use controller::LocalSttApp;

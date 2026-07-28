@@ -1,18 +1,20 @@
-//! Microphone capture via cpal (resampled to 16 kHz mono).
+//! Idle-closed microphone recorder backed by CPAL.
 
 use anyhow::{bail, Context, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::util::{resample_linear, SAMPLE_RATE};
+use crate::audio::capture::{on_input, CallbackGuard};
+use crate::audio::devices::select_input_device;
+use crate::audio::InputDeviceSelection;
+use crate::util::SAMPLE_RATE;
 
-pub struct Recorder {
+pub(crate) struct Recorder {
     recording: Arc<AtomicBool>,
     buffer: Arc<Mutex<Vec<f32>>>,
-    /// RMS * 1000 as an integer for cheap cross-thread reads.
     rms_milli: Arc<AtomicU32>,
     active_callbacks: Arc<AtomicUsize>,
     device: Device,
@@ -20,19 +22,16 @@ pub struct Recorder {
     channels: u16,
     device_rate: u32,
     stream_config: StreamConfig,
-    /// `None` whenever recording is idle. Dropping the stream releases capture.
     stream: Mutex<Option<Stream>>,
 }
 
 impl Recorder {
-    pub fn new() -> Result<Self> {
-        let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .context("no default input device")?;
-        let conf = device
+    pub(crate) fn new(preferred_device: Option<&InputDeviceSelection>) -> Result<Self> {
+        let selected = select_input_device(preferred_device)?;
+        let conf = selected
+            .device
             .default_input_config()
-            .context("default input config")?;
+            .context("read recording-device input configuration")?;
 
         let sample_format = conf.sample_format();
         let channels = conf.channels();
@@ -40,7 +39,8 @@ impl Recorder {
         let stream_config: StreamConfig = conf.into();
 
         println!(
-            "[local-stt] microphone ready but closed while idle (device {device_rate} Hz -> {SAMPLE_RATE} Hz, {channels} ch)"
+            "[local-stt] microphone ready but closed while idle ({}; {device_rate} Hz -> {SAMPLE_RATE} Hz, {channels} ch)",
+            selected.label
         );
 
         Ok(Self {
@@ -48,7 +48,7 @@ impl Recorder {
             buffer: Arc::new(Mutex::new(Vec::new())),
             rms_milli: Arc::new(AtomicU32::new(0)),
             active_callbacks: Arc::new(AtomicUsize::new(0)),
-            device,
+            device: selected.device,
             sample_format,
             channels,
             device_rate,
@@ -57,10 +57,9 @@ impl Recorder {
         })
     }
 
-    pub fn start(&self) -> Result<()> {
-        // Defensive cleanup in case a prior attempt ended unexpectedly.
+    pub(crate) fn start(&self) -> Result<()> {
         self.recording.store(false, Ordering::SeqCst);
-        self.stream.lock().take();
+        drop(self.stream.lock().take());
         self.buffer.lock().clear();
         self.rms_milli.store(0, Ordering::Relaxed);
 
@@ -77,16 +76,10 @@ impl Recorder {
         Ok(())
     }
 
-    pub fn stop(&self) -> Vec<f32> {
+    pub(crate) fn stop(&self) -> Vec<f32> {
         self.recording.store(false, Ordering::SeqCst);
+        drop(self.stream.lock().take());
 
-        // Taking and dropping the CPAL stream closes active capture instead of
-        // leaving a long-lived microphone stream behind while the tray app idles.
-        let stream = self.stream.lock().take();
-        drop(stream);
-
-        // Wait for any callback that was already running when the stream was
-        // dropped. This replaces the old fixed sleep with an observed handoff.
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
         while self.active_callbacks.load(Ordering::Acquire) != 0
             && std::time::Instant::now() < deadline
@@ -101,12 +94,11 @@ impl Recorder {
         std::mem::take(&mut *self.buffer.lock())
     }
 
-    pub fn buffered_samples(&self) -> usize {
+    pub(crate) fn buffered_samples(&self) -> usize {
         self.buffer.lock().len()
     }
 
-    /// Peel the first `n` samples if available (used for live chunked ASR).
-    pub fn take_prefix(&self, n: usize) -> Option<Vec<f32>> {
+    pub(crate) fn take_prefix(&self, n: usize) -> Option<Vec<f32>> {
         let mut buffer = self.buffer.lock();
         if buffer.len() < n {
             return None;
@@ -114,7 +106,7 @@ impl Recorder {
         Some(buffer.drain(..n).collect())
     }
 
-    pub fn rms(&self) -> f32 {
+    pub(crate) fn rms(&self) -> f32 {
         self.rms_milli.load(Ordering::Relaxed) as f32 / 1000.0
     }
 
@@ -134,7 +126,7 @@ impl Recorder {
                         let _callback = CallbackGuard::new(active_callbacks.as_ref());
                         on_input(data, channels, device_rate, &recording, &buffer, &rms);
                     },
-                    move |error| log::error!("audio stream error: {error}"),
+                    log_stream_error,
                     None,
                 )?
             }
@@ -150,20 +142,13 @@ impl Recorder {
                         if !recording.load(Ordering::SeqCst) {
                             return;
                         }
-                        let samples: Vec<f32> = data
+                        let samples = data
                             .iter()
                             .map(|sample| *sample as f32 / 32768.0)
-                            .collect();
-                        on_input(
-                            &samples,
-                            channels,
-                            device_rate,
-                            &recording,
-                            &buffer,
-                            &rms,
-                        );
+                            .collect::<Vec<_>>();
+                        on_input(&samples, channels, device_rate, &recording, &buffer, &rms);
                     },
-                    move |error| log::error!("audio stream error: {error}"),
+                    log_stream_error,
                     None,
                 )?
             }
@@ -179,26 +164,18 @@ impl Recorder {
                         if !recording.load(Ordering::SeqCst) {
                             return;
                         }
-                        let samples: Vec<f32> = data
+                        let samples = data
                             .iter()
                             .map(|sample| (*sample as f32 / 32768.0) - 1.0)
-                            .collect();
-                        on_input(
-                            &samples,
-                            channels,
-                            device_rate,
-                            &recording,
-                            &buffer,
-                            &rms,
-                        );
+                            .collect::<Vec<_>>();
+                        on_input(&samples, channels, device_rate, &recording, &buffer, &rms);
                     },
-                    move |error| log::error!("audio stream error: {error}"),
+                    log_stream_error,
                     None,
                 )?
             }
             other => bail!("unsupported sample format: {other:?}"),
         };
-
         Ok(stream)
     }
 }
@@ -207,54 +184,10 @@ impl Drop for Recorder {
     fn drop(&mut self) {
         self.recording.store(false, Ordering::SeqCst);
         self.rms_milli.store(0, Ordering::Relaxed);
-        self.stream.get_mut().take();
+        drop(self.stream.get_mut().take());
     }
 }
 
-struct CallbackGuard<'a> {
-    counter: &'a AtomicUsize,
-}
-
-impl<'a> CallbackGuard<'a> {
-    fn new(counter: &'a AtomicUsize) -> Self {
-        counter.fetch_add(1, Ordering::AcqRel);
-        Self { counter }
-    }
-}
-
-impl Drop for CallbackGuard<'_> {
-    fn drop(&mut self) {
-        self.counter.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-fn on_input(
-    data: &[f32],
-    channels: u16,
-    device_rate: u32,
-    recording: &AtomicBool,
-    buffer: &Mutex<Vec<f32>>,
-    rms_milli: &AtomicU32,
-) {
-    // Ignore callback races after stop. Idle periods have no stream at all, but
-    // this also prevents conversion or buffering if one final callback is active.
-    if !recording.load(Ordering::SeqCst) {
-        return;
-    }
-
-    let mono: Vec<f32> = if channels <= 1 {
-        data.to_vec()
-    } else {
-        data.chunks(channels as usize)
-            .map(|channel_frame| channel_frame.iter().sum::<f32>() / channels as f32)
-            .collect()
-    };
-
-    if !mono.is_empty() {
-        let mean_sq = mono.iter().map(|sample| sample * sample).sum::<f32>() / mono.len() as f32;
-        rms_milli.store((mean_sq.sqrt() * 1000.0) as u32, Ordering::Relaxed);
-    }
-
-    let resampled = resample_linear(&mono, device_rate, SAMPLE_RATE);
-    buffer.lock().extend_from_slice(&resampled);
+fn log_stream_error(error: cpal::StreamError) {
+    log::error!("audio stream error: {error}");
 }

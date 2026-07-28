@@ -23,12 +23,16 @@ impl LocalSttApp {
         }
 
         self.settings.load_from_config(&self.config);
-        if let Err(error) = self.settings.refresh_input_devices() {
-            self.settings
-                .set_message(format!("Could not list recording devices: {error:#}"), false);
-        } else if let Some(problem) = &self.hotkey_problem {
-            self.settings
-                .set_message(format!("{problem} Choose a different shortcut."), false);
+        self.refresh_recording_devices(false);
+        let hotkey_message = if self.settings.message.is_none() {
+            self.hotkey_problem
+                .as_ref()
+                .map(|problem| format!("{problem} Choose a different shortcut."))
+        } else {
+            None
+        };
+        if let Some(message) = hotkey_message {
+            self.settings.set_message(message, false);
         }
         self.settings.open = true;
         self.settings.focus_pending = true;
@@ -43,6 +47,10 @@ impl LocalSttApp {
         self.settings.message = None;
         let mut should_save = false;
         let mut success_message = "Saved automatically.".to_string();
+
+        if changes.refresh_devices {
+            self.refresh_recording_devices(true);
+        }
 
         if changes.preferences {
             self.copy_preferences_from_form();
@@ -104,6 +112,22 @@ impl LocalSttApp {
             Err(error) => self
                 .settings
                 .set_message(format!("Could not save settings: {error:#}"), false),
+        }
+    }
+
+    fn refresh_recording_devices(&mut self, announce_success: bool) {
+        match self.settings.refresh_input_devices() {
+            Ok(device_count) if announce_success => {
+                let noun = if device_count == 1 { "device" } else { "devices" };
+                self.settings.set_message(
+                    format!("Recording devices refreshed. Found {device_count} {noun}."),
+                    true,
+                );
+            }
+            Ok(_) => {}
+            Err(error) => self
+                .settings
+                .set_message(format!("Could not list recording devices: {error:#}"), false),
         }
     }
 

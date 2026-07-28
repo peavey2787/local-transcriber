@@ -14,13 +14,14 @@ pub(super) struct SettingsMessage {
 #[derive(Default)]
 pub(super) struct SettingsChanges {
     pub(super) hotkey: bool,
+    pub(super) refresh_devices: bool,
     pub(super) recording_device: bool,
     pub(super) preferences: bool,
 }
 
 impl SettingsChanges {
     pub(super) fn any(&self) -> bool {
-        self.hotkey || self.recording_device || self.preferences
+        self.hotkey || self.refresh_devices || self.recording_device || self.preferences
     }
 }
 
@@ -79,9 +80,9 @@ impl SettingsState {
         self.message = None;
     }
 
-    pub(super) fn refresh_input_devices(&mut self) -> Result<()> {
+    pub(super) fn refresh_input_devices(&mut self) -> Result<usize> {
         self.input_devices = input_device_options()?;
-        Ok(())
+        Ok(self.input_devices.len().saturating_sub(1))
     }
 
     pub(super) fn selected_device_label(&self) -> String {
@@ -92,7 +93,7 @@ impl SettingsState {
             .unwrap_or_else(|| {
                 self.recording_device
                     .as_ref()
-                    .map(|device| format!("Unavailable — {}", device.name))
+                    .map(|_| "Unavailable recording device".to_string())
                     .unwrap_or_else(|| "System default".to_string())
             })
     }

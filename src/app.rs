@@ -7,6 +7,7 @@ mod controller;
 mod recording;
 mod result;
 mod settings;
+mod theme;
 mod transcription;
 mod viewport;
 

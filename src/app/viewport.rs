@@ -6,8 +6,8 @@ use crate::overlay::CARD_W;
 
 use super::controller::LocalSttApp;
 
-const SETTINGS_W: f32 = 650.0;
-const SETTINGS_H: f32 = 720.0;
+const SETTINGS_W: f32 = 720.0;
+const SETTINGS_H: f32 = 780.0;
 
 impl LocalSttApp {
     pub(super) fn sync_viewport(&mut self, ctx: &egui::Context) {

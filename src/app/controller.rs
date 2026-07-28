@@ -16,6 +16,7 @@ use crate::tray::{Tray, TrayAction};
 
 use super::recording::LiveSession;
 use super::settings::SettingsState;
+use super::theme;
 use super::transcription::TranscriptionWorker;
 
 pub struct LocalSttApp {
@@ -40,9 +41,7 @@ pub struct LocalSttApp {
 
 impl LocalSttApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>, mut config: Config) -> Result<Self> {
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.visuals = egui::Visuals::dark();
-        cc.egui_ctx.set_style(style);
+        theme::configure(&cc.egui_ctx);
 
         let ui_wake: UiWake = Arc::new(Mutex::new(None));
         let requested_hotkey = config.hotkey.clone();

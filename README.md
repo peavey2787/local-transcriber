@@ -36,7 +36,9 @@ Settings are stored in `~/.local-stt/config.json`.
 
 ## Recording device, auto-paste, and visual notifications
 
-The **Recording device** drop-down lists the currently available input devices plus **System default**. Selecting a device rebuilds the idle recorder immediately and saves that choice automatically. If a saved device is unavailable at startup, local-stt safely falls back to the system default.
+The **Recording device** drop-down lists the currently available input devices plus **System default**. After connecting or disconnecting a microphone, click **Refresh devices** to scan again without restarting local-stt. Low-level ALSA identifiers are replaced with the sound card's readable name when Linux exposes one; otherwise the menu uses neutral labels such as **Device 1** and **Device 2**.
+
+Selecting a device validates it immediately and saves that choice automatically. The selected device is resolved again when each recording starts, so **System default** follows desktop audio changes and newly connected USB microphones can be used after a refresh. If a saved device is unavailable at startup, local-stt safely falls back to the system default.
 
 The Settings window also contains **Automatically paste the transcription with Ctrl+V**. The result is always copied first.
 
@@ -98,9 +100,10 @@ No microphone input stream exists while the app is idle. The stream is created o
 `src/app.rs` is a thin facade. The eframe composition root, recording/session
 control, bounded transcription worker, result delivery, settings state,
 settings application, settings UI, and viewport placement live in focused
-modules under `src/app/`. Audio device discovery, callback processing, and
-recorder lifecycle are separated under `src/audio/`, while single-instance
-ownership lives in `src/instance_lock.rs`.
+modules under `src/app/`. Audio device discovery, readable device labeling,
+backend-diagnostic isolation, callback processing, and recorder lifecycle are
+separated under `src/audio/`, while single-instance ownership lives in
+`src/instance_lock.rs`.
 
 After installation, run the complete offline quality gate with:
 

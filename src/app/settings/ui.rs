@@ -8,6 +8,10 @@ use crate::hotkey::{friendly_name, CaptureOutcome};
 use super::state::SettingsChanges;
 use super::super::controller::LocalSttApp;
 
+fn help_text(text: impl Into<String>) -> RichText {
+    RichText::new(text).size(13.0).weak()
+}
+
 impl LocalSttApp {
     pub(in crate::app) fn draw_settings(&mut self, ctx: &egui::Context) {
         let captured_this_frame = self.poll_shortcut_capture(ctx);
@@ -28,7 +32,10 @@ impl LocalSttApp {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        changes.recording_device |= self.draw_recording_device_section(ui);
+                        let (device_changed, refresh_requested) =
+                            self.draw_recording_device_section(ui);
+                        changes.recording_device |= device_changed;
+                        changes.refresh_devices |= refresh_requested;
                         self.draw_shortcut_section(ui);
                         changes.preferences |= self.draw_auto_paste_section(ui);
                         changes.preferences |= self.draw_notification_section(ui);
@@ -82,7 +89,7 @@ impl LocalSttApp {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
                 ui.heading("local-stt settings");
-                ui.label(RichText::new("Changes save automatically.").small().weak());
+                ui.label(help_text("Changes save automatically."));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("✕").clicked() {
@@ -93,26 +100,36 @@ impl LocalSttApp {
         ui.add_space(14.0);
     }
 
-    fn draw_recording_device_section(&mut self, ui: &mut egui::Ui) -> bool {
+    fn draw_recording_device_section(&mut self, ui: &mut egui::Ui) -> (bool, bool) {
         ui.label(RichText::new("Recording device").strong());
         ui.label("Choose which microphone local-stt opens when recording starts.");
-        ui.add_space(6.0);
+        ui.add_space(8.0);
 
         let before = self.settings.recording_device.clone();
         let options = self.settings.input_devices.clone();
-        egui::ComboBox::from_id_salt("recording-device")
-            .selected_text(self.settings.selected_device_label())
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                for option in options {
-                    ui.selectable_value(
-                        &mut self.settings.recording_device,
-                        option.selection,
-                        option.label,
-                    );
-                }
-            });
-        before != self.settings.recording_device
+        let refresh_requested = ui
+            .horizontal(|ui| {
+                let button_width = 138.0;
+                let combo_width =
+                    (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(160.0);
+                egui::ComboBox::from_id_salt("recording-device")
+                    .selected_text(self.settings.selected_device_label())
+                    .width(combo_width)
+                    .show_ui(ui, |ui| {
+                        for option in options {
+                            ui.selectable_value(
+                                &mut self.settings.recording_device,
+                                option.selection,
+                                option.label,
+                            );
+                        }
+                    });
+                ui.add_sized([button_width, 30.0], egui::Button::new("Refresh devices"))
+                    .on_hover_text("Scan again after connecting or disconnecting a microphone")
+                    .clicked()
+            })
+            .inner;
+        (before != self.settings.recording_device, refresh_requested)
     }
 
     fn draw_shortcut_section(&mut self, ui: &mut egui::Ui) {
@@ -133,13 +150,9 @@ impl LocalSttApp {
                     self.draw_current_shortcut(ui);
                 }
             });
-        ui.label(
-            RichText::new(
-                "The shortcut is captured from the keyboard; there are no preset choices or manually typed shortcut strings.",
-            )
-            .small()
-            .weak(),
-        );
+        ui.label(help_text(
+            "The shortcut is captured from the keyboard; there are no preset choices or manually typed shortcut strings.",
+        ));
     }
 
     fn draw_active_shortcut_capture(&mut self, ui: &mut egui::Ui) {
@@ -148,11 +161,9 @@ impl LocalSttApp {
                 .strong()
                 .color(Color32::from_rgb(67, 196, 214)),
         );
-        ui.label(
-            RichText::new("Optionally hold Ctrl, Alt, or Shift, then press one main key.")
-                .small()
-                .weak(),
-        );
+        ui.label(help_text(
+            "Optionally hold Ctrl, Alt, or Shift, then press one main key.",
+        ));
         ui.add_space(6.0);
         if ui.button("Cancel capture").clicked() {
             self.settings.capturing_hotkey = false;
@@ -164,7 +175,7 @@ impl LocalSttApp {
     fn draw_current_shortcut(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new("Current shortcut").small().weak());
+                ui.label(help_text("Current shortcut"));
                 ui.label(
                     RichText::new(friendly_name(&self.settings.hotkey))
                         .size(17.0)
@@ -194,13 +205,9 @@ impl LocalSttApp {
                 "Automatically paste the transcription with Ctrl+V",
             )
             .changed();
-        ui.label(
-            RichText::new(
-                "The result is copied first. A successful auto-paste does not show the editable result textbox.",
-            )
-            .small()
-            .weak(),
-        );
+        ui.label(help_text(
+            "The result is copied first. A successful auto-paste does not show the editable result textbox.",
+        ));
         changed
     }
 
@@ -221,13 +228,9 @@ impl LocalSttApp {
                 )
                 .changed();
         });
-        ui.label(
-            RichText::new(
-                "Applies to temporary notices and untouched transcription results. Recording, loading, and transcribing stay visible while active.",
-            )
-            .small()
-            .weak(),
-        );
+        ui.label(help_text(
+            "Applies to temporary notices and untouched transcription results. Recording, loading, and transcribing stay visible while active.",
+        ));
         ui.add_space(4.0);
         changed |= ui
             .checkbox(

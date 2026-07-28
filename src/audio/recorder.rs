@@ -13,46 +13,37 @@ use crate::audio::InputDeviceSelection;
 use crate::util::SAMPLE_RATE;
 
 pub(crate) struct Recorder {
+    preferred_device: Option<InputDeviceSelection>,
     recording: Arc<AtomicBool>,
     buffer: Arc<Mutex<Vec<f32>>>,
     rms_milli: Arc<AtomicU32>,
     active_callbacks: Arc<AtomicUsize>,
+    stream: Mutex<Option<Stream>>,
+}
+
+struct PreparedInput {
     device: Device,
+    label: String,
     sample_format: SampleFormat,
     channels: u16,
     device_rate: u32,
     stream_config: StreamConfig,
-    stream: Mutex<Option<Stream>>,
 }
 
 impl Recorder {
     pub(crate) fn new(preferred_device: Option<&InputDeviceSelection>) -> Result<Self> {
-        let selected = select_input_device(preferred_device)?;
-        let conf = selected
-            .device
-            .default_input_config()
-            .context("read recording-device input configuration")?;
-
-        let sample_format = conf.sample_format();
-        let channels = conf.channels();
-        let device_rate = conf.sample_rate().0;
-        let stream_config: StreamConfig = conf.into();
-
+        let prepared = prepare_input(preferred_device)?;
         println!(
-            "[local-stt] microphone ready but closed while idle ({}; {device_rate} Hz -> {SAMPLE_RATE} Hz, {channels} ch)",
-            selected.label
+            "[local-stt] microphone configured and closed while idle ({}; {} Hz -> {SAMPLE_RATE} Hz, {} ch)",
+            prepared.label, prepared.device_rate, prepared.channels
         );
 
         Ok(Self {
+            preferred_device: preferred_device.cloned(),
             recording: Arc::new(AtomicBool::new(false)),
             buffer: Arc::new(Mutex::new(Vec::new())),
             rms_milli: Arc::new(AtomicU32::new(0)),
             active_callbacks: Arc::new(AtomicUsize::new(0)),
-            device: selected.device,
-            sample_format,
-            channels,
-            device_rate,
-            stream_config,
             stream: Mutex::new(None),
         })
     }
@@ -63,7 +54,13 @@ impl Recorder {
         self.buffer.lock().clear();
         self.rms_milli.store(0, Ordering::Relaxed);
 
-        let stream = self.build_stream().context("open microphone capture")?;
+        // Resolve the selection again for every recording. This makes
+        // "System default" follow desktop audio changes and lets a refreshed,
+        // newly connected USB microphone be used without restarting local-stt.
+        let prepared = prepare_input(self.preferred_device.as_ref())?;
+        let stream = self
+            .build_stream(&prepared)
+            .context("open microphone capture")?;
         self.recording.store(true, Ordering::SeqCst);
         if let Err(error) = stream.play() {
             self.recording.store(false, Ordering::SeqCst);
@@ -72,6 +69,7 @@ impl Recorder {
             drop(stream);
             return Err(error).context("start microphone capture");
         }
+        println!("[local-stt] microphone opened ({})", prepared.label);
         *self.stream.lock() = Some(stream);
         Ok(())
     }
@@ -110,18 +108,18 @@ impl Recorder {
         self.rms_milli.load(Ordering::Relaxed) as f32 / 1000.0
     }
 
-    fn build_stream(&self) -> Result<Stream> {
-        let channels = self.channels;
-        let device_rate = self.device_rate;
+    fn build_stream(&self, prepared: &PreparedInput) -> Result<Stream> {
+        let channels = prepared.channels;
+        let device_rate = prepared.device_rate;
 
-        let stream = match self.sample_format {
+        let stream = match prepared.sample_format {
             SampleFormat::F32 => {
                 let recording = self.recording.clone();
                 let buffer = self.buffer.clone();
                 let rms = self.rms_milli.clone();
                 let active_callbacks = self.active_callbacks.clone();
-                self.device.build_input_stream(
-                    &self.stream_config,
+                prepared.device.build_input_stream(
+                    &prepared.stream_config,
                     move |data: &[f32], _| {
                         let _callback = CallbackGuard::new(active_callbacks.as_ref());
                         on_input(data, channels, device_rate, &recording, &buffer, &rms);
@@ -135,8 +133,8 @@ impl Recorder {
                 let buffer = self.buffer.clone();
                 let rms = self.rms_milli.clone();
                 let active_callbacks = self.active_callbacks.clone();
-                self.device.build_input_stream(
-                    &self.stream_config,
+                prepared.device.build_input_stream(
+                    &prepared.stream_config,
                     move |data: &[i16], _| {
                         let _callback = CallbackGuard::new(active_callbacks.as_ref());
                         if !recording.load(Ordering::SeqCst) {
@@ -157,8 +155,8 @@ impl Recorder {
                 let buffer = self.buffer.clone();
                 let rms = self.rms_milli.clone();
                 let active_callbacks = self.active_callbacks.clone();
-                self.device.build_input_stream(
-                    &self.stream_config,
+                prepared.device.build_input_stream(
+                    &prepared.stream_config,
                     move |data: &[u16], _| {
                         let _callback = CallbackGuard::new(active_callbacks.as_ref());
                         if !recording.load(Ordering::SeqCst) {
@@ -186,6 +184,22 @@ impl Drop for Recorder {
         self.rms_milli.store(0, Ordering::Relaxed);
         drop(self.stream.get_mut().take());
     }
+}
+
+fn prepare_input(preferred_device: Option<&InputDeviceSelection>) -> Result<PreparedInput> {
+    let selected = select_input_device(preferred_device)?;
+    let configuration = selected
+        .device
+        .default_input_config()
+        .context("read recording-device input configuration")?;
+    Ok(PreparedInput {
+        sample_format: configuration.sample_format(),
+        channels: configuration.channels(),
+        device_rate: configuration.sample_rate().0,
+        stream_config: configuration.into(),
+        device: selected.device,
+        label: selected.label,
+    })
 }
 
 fn log_stream_error(error: cpal::StreamError) {

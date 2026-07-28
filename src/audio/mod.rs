@@ -1,6 +1,9 @@
 //! Microphone device discovery and recording.
 
+mod backend_diagnostics;
 mod capture;
+mod device_labels;
+mod device_metadata;
 mod devices;
 mod recorder;
 

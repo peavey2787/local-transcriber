@@ -25,6 +25,11 @@ This source archive replaces the Windows-only application path with a Linux-firs
 - Added physical-key normalization and live Ctrl, Alt, and Shift combination capture.
 - Split visual notifications into independent loading, recording, transcribing, and result controls.
 - Added an automatically persisted recording-device drop-down with a system-default option and duplicate-device disambiguation.
+- Added explicit recording-device refresh for microphones connected after the Settings window opens.
+- Replaced raw ALSA identifiers with `/proc/asound` card names when available and numbered neutral labels otherwise.
+- Re-resolve the selected microphone at recording start so system-default changes and refreshed USB devices do not require an app restart.
+- Suppressed ALSA/JACK compatibility-probe noise only while CPAL device enumeration runs; enumeration failures still return normally.
+- Increased shared UI typography, helper-text size, control height, spacing, and Settings window dimensions for laptop readability.
 - Added a 1–60 second temporary notification-duration setting and removed hard-coded notice/result timeouts.
 - Removed the Save/Apply workflow; every settings change now validates, applies, and persists immediately.
 - Split microphone discovery, callback processing, recorder lifecycle, settings state, settings behavior, and settings UI into focused SRP modules.

@@ -8,13 +8,11 @@ use sherpa_onnx::{
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::model::{ensure_parakeet_int8, ModelPaths};
+use crate::model::ensure_parakeet_int8;
 use crate::util::{cpu_threads, trim_silence, SAMPLE_RATE};
 
 pub struct AsrEngine {
     recognizer: Mutex<OfflineRecognizer>,
-    #[allow(dead_code)]
-    paths: ModelPaths,
 }
 
 impl AsrEngine {
@@ -59,7 +57,6 @@ impl AsrEngine {
         println!("[local-stt] Parakeet INT8 ready");
         Ok(Arc::new(Self {
             recognizer: Mutex::new(recognizer),
-            paths,
         }))
     }
 

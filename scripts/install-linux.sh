@@ -17,7 +17,8 @@ if ! command_exists apt-get || ! command_exists dpkg-query; then
 This installer currently supports Debian, Ubuntu, Devuan, Linux Mint, and
 other apt-based distributions. Install the packages listed in README.md for
 your distribution, install Rust with rustup, then run:
-  cargo build --release
+  ./scripts/prepare-sherpa-runtime.sh
+  SHERPA_ONNX_LIB_DIR="$PWD/.native/lib" cargo build --release --locked
 MSG
   exit 69
 fi
@@ -27,6 +28,10 @@ required_packages=(
   pkg-config
   curl
   ca-certificates
+  bzip2
+  tar
+  coreutils
+  python3
   libssl-dev
   libasound2-dev
   libgtk-3-dev
@@ -95,8 +100,57 @@ else
   log "Rust is already installed"
 fi
 
-log "Building local-stt in release mode"
-cargo build --release
+log "Canonicalizing and validating Cargo.lock without changing its package inventory"
+# Cargo.lock is security-sensitive. Cargo may need to normalize serialization or
+# dependency-reference spelling after a toolchain change, but it must never be
+# allowed to silently select different packages. Capture the exact package
+# identities first, let Cargo normalize the lock, then reject any change to a
+# package name, release, source/Git commit, or registry checksum.
+lock_backup="$(mktemp)"
+inventory_before="$(mktemp)"
+inventory_after="$(mktemp)"
+cleanup_lock_validation() {
+  rm -f -- "$lock_backup" "$inventory_before" "$inventory_after"
+}
+trap cleanup_lock_validation EXIT
+
+cp -- Cargo.lock "$lock_backup"
+"$ROOT_DIR/scripts/cargo-lock-inventory.py" Cargo.lock >"$inventory_before"
+
+# Prefer a fully offline normalization when all sources are already cached.
+# A first installation may need Cargo to fetch the pinned Git source and crate
+# index metadata, so retry online. The inventory comparison below still forbids
+# Cargo from changing any selected package.
+if ! cargo metadata --offline --format-version 1 >/dev/null 2>&1; then
+  cargo metadata --format-version 1 >/dev/null
+fi
+
+"$ROOT_DIR/scripts/cargo-lock-inventory.py" Cargo.lock >"$inventory_after"
+if ! cmp -s "$inventory_before" "$inventory_after"; then
+  cp -- "$lock_backup" Cargo.lock
+  echo "ERROR: Cargo attempted to change the locked package inventory." >&2
+  echo "The original Cargo.lock has been restored. Refusing a non-reproducible build." >&2
+  diff -u "$inventory_before" "$inventory_after" >&2 || true
+  exit 65
+fi
+
+# This is the authoritative Cargo-level check. It must succeed after the
+# representation-only normalization, and every subsequent command remains locked.
+cargo metadata --locked --format-version 1 >/dev/null
+cleanup_lock_validation
+trap - EXIT
+
+log "Preparing the SHA-256-verified Sherpa/ONNX native runtime"
+"$ROOT_DIR/scripts/prepare-sherpa-runtime.sh"
+
+log "Building local-stt from Cargo.lock"
+export SHERPA_ONNX_LIB_DIR="$ROOT_DIR/.native/lib"
+if [[ ! -d "$SHERPA_ONNX_LIB_DIR" ]]; then
+  echo "ERROR: verified Sherpa/ONNX library directory is missing: $SHERPA_ONNX_LIB_DIR" >&2
+  exit 70
+fi
+printf 'Using verified Sherpa/ONNX libraries from: %s\n' "$SHERPA_ONNX_LIB_DIR"
+cargo build --release --locked
 
 cat <<MSG
 

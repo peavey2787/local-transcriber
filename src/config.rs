@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    #[serde(default = "default_model")]
-    pub model: String,
     /// Global shortcut syntax accepted by global-hotkey. This value is produced
     /// by the Settings shortcut-capture control rather than typed manually.
     #[serde(default = "default_hotkey")]
@@ -33,10 +33,6 @@ pub struct Config {
     legacy_show_notifications: Option<bool>,
 }
 
-fn default_model() -> String {
-    "parakeet-int8".into()
-}
-
 fn default_hotkey() -> String {
     // The physical ` / ~ key. Shift is intentionally not required.
     "Backquote".into()
@@ -49,7 +45,6 @@ fn default_true() -> bool {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            model: default_model(),
             hotkey: default_hotkey(),
             auto_paste: false,
             show_loading_notifications: true,
@@ -106,10 +101,37 @@ pub fn load() -> Config {
 
 pub fn save(cfg: &Config) -> Result<()> {
     let dir = config_dir();
-    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
+    prepare_private_dir(&dir)?;
     let path = config_path();
-    let s = serde_json::to_string_pretty(cfg)?;
-    fs::write(&path, s).with_context(|| format!("write {}", path.display()))?;
+    let temporary = path.with_extension("json.part");
+    let serialized = serde_json::to_vec_pretty(cfg)?;
+
+    let write_result = (|| -> Result<()> {
+        let mut file = File::create(&temporary)
+            .with_context(|| format!("create {}", temporary.display()))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("protect {}", temporary.display()))?;
+        file.write_all(&serialized)
+            .with_context(|| format!("write {}", temporary.display()))?;
+        file.write_all(b"\n")
+            .with_context(|| format!("finish {}", temporary.display()))?;
+        file.sync_all()
+            .with_context(|| format!("flush {}", temporary.display()))?;
+        fs::rename(&temporary, &path)
+            .with_context(|| format!("activate {}", path.display()))?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write_result
+}
+
+pub(crate) fn prepare_private_dir(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).with_context(|| format!("create {}", path.display()))?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("protect {}", path.display()))?;
     Ok(())
 }
 
@@ -134,6 +156,7 @@ mod tests {
     fn new_config_does_not_serialize_the_legacy_toggle() {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(!json.contains("show_notifications"));
+        assert!(!json.contains("\"model\""));
         assert!(json.contains("show_loading_notifications"));
         assert!(json.contains("show_recording_notifications"));
         assert!(json.contains("show_transcribing_notifications"));

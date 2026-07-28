@@ -5,39 +5,33 @@ mod asr;
 mod audio;
 mod config;
 mod hotkey;
+mod instance_lock;
 mod model;
 mod overlay;
 mod paste;
+mod sha256;
 mod tray;
 mod util;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use eframe::egui;
-use std::net::TcpListener;
 
 use crate::app::LocalSttApp;
 use crate::overlay::{CARD_H, CARD_W};
 
-fn acquire_instance_lock() -> Result<TcpListener> {
-    match TcpListener::bind(("127.0.0.1", 47915)) {
-        Ok(listener) => Ok(listener),
-        Err(_) => bail!(
-            "already running (another instance holds the tray lock).\n\
-             Quit it from the system tray, or kill the old local-stt process."
-        ),
-    }
-}
-
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
-    let _lock = match acquire_instance_lock() {
+    let _lock = match instance_lock::acquire() {
         Ok(listener) => listener,
         Err(error) => {
             eprintln!("[local-stt] {error}");
             std::process::exit(1);
         }
     };
+
+    #[cfg(target_os = "linux")]
+    let _legacy_backend_warning_filter = tray::install_legacy_backend_warning_filter();
 
     #[cfg(target_os = "linux")]
     {

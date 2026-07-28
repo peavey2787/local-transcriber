@@ -21,5 +21,5 @@ MSG
 fi
 
 export GLOBAL_HOTKEY_APP_ID="${GLOBAL_HOTKEY_APP_ID:-io.local-stt.parakeet}"
-export LD_LIBRARY_PATH="$ROOT_DIR/target/release:$ROOT_DIR/target/release/deps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="$ROOT_DIR/.native/lib:$ROOT_DIR/target/release:$ROOT_DIR/target/release/deps${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$BIN" "$@"

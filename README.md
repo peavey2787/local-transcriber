@@ -86,13 +86,37 @@ While speaking, audio is decoded in live 10-second chunks, so stopping usually w
 | Model cache | `~/.local-stt/models/` |
 | Config | `~/.local-stt/config.json` |
 
-The first launch downloads roughly 500 MB of model files. Audio transcription runs locally; the model download is the only required network use.
+The first launch downloads roughly 500 MB of model files. The download is accepted only when its fixed SHA-256 matches the expected release asset, and extraction rejects unsafe archive paths and non-file entries. Audio transcription runs locally.
+
+No microphone input stream exists while the app is idle. The stream is created only when recording starts and is dropped completely before transcription begins. Transcribed words are not written to stdout or application logs.
+
+## Architecture and code-quality checks
+
+`src/app.rs` is a thin facade. The eframe composition root, recording/session
+control, bounded transcription worker, result delivery, settings, and viewport
+placement live in focused modules under `src/app/`, while single-instance
+ownership lives in `src/instance_lock.rs`.
+
+After installation, run the complete offline quality gate with:
+
+```bash
+./scripts/audit-linux.sh
+```
+
+It checks formatting, locked metadata, Clippy with warnings denied, all tests,
+and the release build without permitting network access. See `CODE-AUDIT.md` for
+the detailed responsibility, duplication, complexity, and deprecation review.
 
 ## Build and package manually
 
 ```bash
-cargo build --release
+./scripts/prepare-sherpa-runtime.sh
+SHERPA_ONNX_LIB_DIR="$PWD/.native/lib" cargo build --release --locked
 ./scripts/package-linux.sh
 ```
 
 The package is written to `dist/local-stt-linux-x86_64.tar.gz`.
+
+`Cargo.lock` is committed and every installer/CI build uses `--locked`. The native Sherpa/ONNX release archive is downloaded by `scripts/prepare-sherpa-runtime.sh`, checked against a fixed SHA-256 before extraction, and supplied through `SHERPA_ONNX_LIB_DIR` so the dependency build does not perform its own native-library download.
+
+See `SECURITY.md` for the complete microphone, download-integrity, dependency-lock, and network-boundary description.

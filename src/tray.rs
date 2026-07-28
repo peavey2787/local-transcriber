@@ -20,13 +20,29 @@ pub struct Tray {
     quit_id: muda::MenuId,
 }
 
-
 fn hotkey_menu_text(hotkey: &str) -> String {
     if hotkey.trim().is_empty() {
         "No recording hotkey — open Settings…".into()
     } else {
         format!("{} to record", friendly_name(hotkey))
     }
+}
+
+pub(crate) fn install_legacy_backend_warning_filter() -> gtk::glib::LogHandlerId {
+    gtk::glib::log_set_handler(
+        Some("libayatana-appindicator"),
+        gtk::glib::LogLevels::LEVEL_WARNING,
+        false,
+        false,
+        |domain, level, message| {
+            if message.contains("libayatana-appindicator is deprecated")
+                && message.contains("libayatana-appindicator-glib")
+            {
+                return;
+            }
+            gtk::glib::log_default_handler(domain, level, Some(message));
+        },
+    )
 }
 
 impl Tray {

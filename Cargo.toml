@@ -15,7 +15,7 @@ dirs = "6"
 eframe = { version = "0.31", default-features = true, features = ["default_fonts"] }
 egui = "0.31"
 env_logger = "0.11"
-global-hotkey = { package = "wayclip-global-hotkey", version = "0.7" }
+global-hotkey = { package = "wayclip-global-hotkey", git = "https://github.com/Wayclip/global-hotkey", rev = "aed9bbcfb87682dfdc9d434484026959b8066f40" }
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 muda = "0.15"
@@ -23,8 +23,9 @@ parking_lot = "0.12"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "=0.10.9"
 # Use shared sherpa/ONNX libraries so the Linux package can bundle the native runtime.
-sherpa-onnx = { version = "1.13", default-features = false, features = ["shared"] }
+sherpa-onnx = { version = "=1.13.4", default-features = false, features = ["shared"] }
 tar = "0.4"
 tray-icon = "0.19"
 

@@ -141,7 +141,38 @@ impl Overlay {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) -> Option<OverlayAction> {
-        let (status, accent) = match &self.state {
+        let (status, accent) = self.status_visuals();
+        let mut action = None;
+        let mut pin_result = false;
+
+        Frame::NONE
+            .fill(BORDER)
+            .corner_radius(CornerRadius::same(18))
+            .inner_margin(1.0)
+            .show(ui, |ui| {
+                Frame::NONE
+                    .fill(BG)
+                    .corner_radius(CornerRadius::same(16))
+                    .inner_margin(egui::Margin::symmetric(18, 12))
+                    .show(ui, |ui| {
+                        self.draw_status_row(ui, &status, accent);
+                        let result = Self::draw_result_panel(&mut self.state, ui);
+                        action = result.0;
+                        pin_result = result.1;
+                    });
+            });
+
+        if pin_result {
+            self.dismiss_at = None;
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.dismiss();
+        }
+        action
+    }
+
+    fn status_visuals(&self) -> (String, Color32) {
+        match &self.state {
             OverlayState::Hidden => (String::new(), SUBTEXT),
             OverlayState::Loading { message } => (message.clone(), ACCENT),
             OverlayState::Listening => (
@@ -156,115 +187,100 @@ impl Overlay {
                 (if *ok { "Done" } else { "Nothing heard" }).into(),
                 if *ok { GREEN } else { RED },
             ),
+        }
+    }
+
+    fn draw_status_row(&mut self, ui: &mut egui::Ui, status: &str, accent: Color32) {
+        let available = ui.available_width();
+        let meter_width = 64.0;
+        let text_width = (available - meter_width - 104.0).max(140.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("●").size(18.0).color(accent));
+            ui.add_space(8.0);
+            ui.add_sized(
+                [text_width, 58.0],
+                egui::Label::new(RichText::new(status).size(15.0).color(TEXT)).wrap(),
+            );
+            ui.add_space(8.0);
+            self.draw_bars(ui, accent);
+        });
+    }
+
+    fn draw_result_panel(
+        state: &mut OverlayState,
+        ui: &mut egui::Ui,
+    ) -> (Option<OverlayAction>, bool) {
+        let OverlayState::Result {
+            text,
+            ok,
+            footer,
+            interacted,
+        } = state
+        else {
+            return (None, false);
         };
 
-        let mut action = None;
+        ui.add_space(6.0);
+        ui.separator();
+        ui.add_space(8.0);
+
         let mut pin_result = false;
-
-        Frame::NONE
-            .fill(BORDER)
-            .corner_radius(CornerRadius::same(18))
-            .inner_margin(1.0)
-            .show(ui, |ui| {
-                Frame::NONE
-                    .fill(BG)
-                    .corner_radius(CornerRadius::same(16))
-                    .inner_margin(egui::Margin::symmetric(18, 12))
-                    .show(ui, |ui| {
-                        let available = ui.available_width();
-                        let meter_width = 64.0;
-                        let text_width = (available - meter_width - 104.0).max(140.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("●").size(18.0).color(accent));
-                            ui.add_space(8.0);
-                            ui.add_sized(
-                                [text_width, 58.0],
-                                egui::Label::new(RichText::new(status).size(15.0).color(TEXT))
-                                    .wrap(),
-                            );
-                            ui.add_space(8.0);
-                            self.draw_bars(ui, accent);
-                        });
-
-                        if let OverlayState::Result {
-                            text,
-                            ok,
-                            footer,
-                            interacted,
-                        } = &mut self.state
-                        {
-                            ui.add_space(6.0);
-                            ui.separator();
-                            ui.add_space(8.0);
-
-                            if *ok {
-                                Frame::NONE
-                                    .fill(Color32::from_rgb(0x16, 0x17, 0x17))
-                                    .stroke(Stroke::new(1.0, BORDER))
-                                    .corner_radius(CornerRadius::same(10))
-                                    .inner_margin(10.0)
-                                    .show(ui, |ui| {
-                                        let editor_width = ui.available_width();
-                                        let response = ui.add_sized(
-                                            [editor_width, 170.0],
-                                            egui::TextEdit::multiline(text)
-                                                .desired_width(f32::INFINITY)
-                                                .desired_rows(7)
-                                                .hint_text("Edit the transcription here"),
-                                        );
-                                        if response.clicked()
-                                            || response.has_focus()
-                                            || response.changed()
-                                        {
-                                            *interacted = true;
-                                            pin_result = true;
-                                        }
-                                    });
-                            } else {
-                                let message_width = ui.available_width();
-                                ui.add_sized(
-                                    [message_width, 130.0],
-                                    egui::Label::new(
-                                        RichText::new("No speech was detected.")
-                                            .size(14.0)
-                                            .color(SUBTEXT),
-                                    )
-                                    .wrap(),
-                                );
-                            }
-
-                            ui.add_space(8.0);
-                            ui.horizontal(|ui| {
-                                let footer_text = if *interacted {
-                                    "Editing — click Copy / Done to update the clipboard"
-                                } else {
-                                    footer.as_str()
-                                };
-                                let label_width = (ui.available_width() - 120.0).max(100.0);
-                                ui.add_sized(
-                                    [label_width, 28.0],
-                                    egui::Label::new(
-                                        RichText::new(format!("{footer_text}  ·  Esc to close"))
-                                            .size(11.0)
-                                            .color(SUBTEXT),
-                                    )
-                                    .wrap(),
-                                );
-                                if *ok && ui.button("Copy / Done").clicked() {
-                                    action = Some(OverlayAction::CopyDone(text.clone()));
-                                }
-                            });
-                        }
-                    });
-            });
-
-        if pin_result {
-            self.dismiss_at = None;
+        if *ok {
+            Frame::NONE
+                .fill(Color32::from_rgb(0x16, 0x17, 0x17))
+                .stroke(Stroke::new(1.0, BORDER))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    let editor_width = ui.available_width();
+                    let response = ui.add_sized(
+                        [editor_width, 170.0],
+                        egui::TextEdit::multiline(text)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(7)
+                            .hint_text("Edit the transcription here"),
+                    );
+                    if response.clicked() || response.has_focus() || response.changed() {
+                        *interacted = true;
+                        pin_result = true;
+                    }
+                });
+        } else {
+            let message_width = ui.available_width();
+            ui.add_sized(
+                [message_width, 130.0],
+                egui::Label::new(
+                    RichText::new("No speech was detected.")
+                        .size(14.0)
+                        .color(SUBTEXT),
+                )
+                .wrap(),
+            );
         }
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.dismiss();
-        }
-        action
+
+        ui.add_space(8.0);
+        let mut action = None;
+        ui.horizontal(|ui| {
+            let footer_text = if *interacted {
+                "Editing — click Copy / Done to update the clipboard"
+            } else {
+                footer.as_str()
+            };
+            let label_width = (ui.available_width() - 120.0).max(100.0);
+            ui.add_sized(
+                [label_width, 28.0],
+                egui::Label::new(
+                    RichText::new(format!("{footer_text}  ·  Esc to close"))
+                        .size(11.0)
+                        .color(SUBTEXT),
+                )
+                .wrap(),
+            );
+            if *ok && ui.button("Copy / Done").clicked() {
+                action = Some(OverlayAction::CopyDone(text.clone()));
+            }
+        });
+        (action, pin_result)
     }
 
     fn draw_bars(&mut self, ui: &mut egui::Ui, color: Color32) {
@@ -293,7 +309,6 @@ impl Overlay {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -9,7 +9,7 @@ use super::state::SettingsChanges;
 use super::super::controller::LocalSttApp;
 
 impl LocalSttApp {
-    pub(super) fn draw_settings(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn draw_settings(&mut self, ctx: &egui::Context) {
         let captured_this_frame = self.poll_shortcut_capture(ctx);
         let mut changes = SettingsChanges {
             hotkey: captured_this_frame,

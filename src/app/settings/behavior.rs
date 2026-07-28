@@ -9,7 +9,7 @@ use super::state::SettingsChanges;
 use super::super::controller::LocalSttApp;
 
 impl LocalSttApp {
-    pub(super) fn open_settings(&mut self) {
+    pub(in crate::app) fn open_settings(&mut self) {
         if self.recording || self.session.as_ref().is_some_and(|session| session.finishing) {
             if self.config.show_result_notifications {
                 self.overlay.show_notice(

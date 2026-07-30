@@ -1,0 +1,90 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//! local-stt-rs — Windows tray speech-to-text powered by Parakeet TDT.
+
+#[cfg(not(target_os = "windows"))]
+compile_error!("The windows project supports only Windows.");
+
+mod app;
+mod asr;
+mod audio;
+mod config;
+mod hotkey;
+mod model;
+mod overlay;
+mod platform;
+mod sha256;
+mod tray;
+mod util;
+
+use anyhow::Result;
+use eframe::egui;
+
+use crate::app::LocalSttApp;
+use crate::overlay::{CARD_H, CARD_W};
+
+fn main() {
+    if let Err(error) = run() {
+        let message = format!("{error:#}");
+        eprintln!("[local-stt] {message}");
+        platform::show_error("local-stt could not start", &message);
+    }
+}
+
+fn run() -> Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
+    let _instance_lock = platform::acquire_instance_lock()?;
+
+    let mut cfg = config::load();
+    if !cfg.hotkey.trim().is_empty() {
+        if let Err(error) = hotkey::validate(&cfg.hotkey) {
+            eprintln!(
+                "[local-stt] configured hotkey is invalid ({error}); disabling it until Settings is updated"
+            );
+            cfg.hotkey.clear();
+        }
+    }
+    config::save(&cfg)?;
+
+    println!(
+        "[local-stt] running on {} — hotkey={} — auto_paste={}",
+        std::env::consts::OS,
+        hotkey::friendly_name(&cfg.hotkey),
+        cfg.auto_paste
+    );
+
+    // The single native window becomes either a non-activating status overlay
+    // or the settings panel. When idle it is parked off-screen while the tray
+    // and global shortcut remain active.
+    let viewport = egui::ViewportBuilder::default()
+        .with_title("local-stt")
+        .with_inner_size([CARD_W, CARD_H])
+        .with_position([-32000.0, -32000.0])
+        .with_decorations(false)
+        .with_transparent(true)
+        .with_always_on_top()
+        .with_taskbar(false)
+        .with_resizable(false)
+        .with_visible(true)
+        .with_active(false);
+
+    let native_options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "local-stt",
+        native_options,
+        Box::new(move |cc| match LocalSttApp::new(cc, cfg.clone()) {
+            Ok(app) => Ok(Box::new(app) as Box<dyn eframe::App>),
+            Err(error) => {
+                eprintln!("[local-stt] failed to start: {error:#}");
+                Err(error.into())
+            }
+        }),
+    )
+    .map_err(|error| anyhow::anyhow!("eframe error: {error}"))?;
+
+    Ok(())
+}

@@ -1,9 +1,2 @@
+/local-transcriber.zip
 /target/
-/.native/
-/dist/
-*.log
-*.part
-*.profraw
-*.profdata
-core
-core.*

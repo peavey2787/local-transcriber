@@ -60,7 +60,7 @@ impl Tray {
             if let Some(action) = action {
                 if action_tx.send(action).is_ok() {
                     log::debug!("tray command queued: {action:?}");
-                    ui_wake.request_repaint();
+                    ui_wake.request_root_repaint();
                 }
             }
         }));

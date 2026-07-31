@@ -35,7 +35,7 @@ impl Hotkeys {
                 let _ = tx.send(());
             }
             if let Some(wake) = UI_WAKE.get() {
-                wake.request_repaint();
+                wake.request_root_repaint();
             }
         }));
 

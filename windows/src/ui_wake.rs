@@ -1,4 +1,4 @@
-//! Thread-safe wake handle for events originating outside the egui loop.
+//! Thread-safe root-viewport wake handle for events outside the egui loop.
 
 use eframe::egui;
 use parking_lot::Mutex;
@@ -17,9 +17,9 @@ impl UiWake {
         }
     }
 
-    pub(crate) fn request_repaint(&self) {
+    pub(crate) fn request_root_repaint(&self) {
         if let Some(context) = self.context.lock().as_ref() {
-            context.request_repaint();
+            context.request_repaint_of(egui::ViewportId::ROOT);
         }
     }
 }
@@ -30,6 +30,39 @@ mod tests {
 
     #[test]
     fn wake_can_be_requested_before_egui_is_installed() {
-        UiWake::default().request_repaint();
+        UiWake::default().request_root_repaint();
+    }
+
+    #[test]
+    fn external_events_target_root_even_when_a_child_was_current() {
+        let context = egui::Context::default();
+        let requested_viewports = Arc::new(Mutex::new(Vec::new()));
+        let captured_viewports = requested_viewports.clone();
+        context.set_request_repaint_callback(move |request| {
+            captured_viewports.lock().push(request.viewport_id);
+        });
+
+        let child_viewport = egui::ViewportId::from_hash_of("settings-child");
+        let child_input = egui::RawInput {
+            viewport_id: child_viewport,
+            viewports: [
+                (egui::ViewportId::ROOT, Default::default()),
+                (child_viewport, Default::default()),
+            ]
+            .into_iter()
+            .collect(),
+            ..Default::default()
+        };
+        let _ = context.run(child_input, |_ctx| {});
+        requested_viewports.lock().clear();
+
+        let wake = UiWake::default();
+        wake.install(&context);
+        wake.request_root_repaint();
+
+        assert_eq!(
+            requested_viewports.lock().last(),
+            Some(&egui::ViewportId::ROOT)
+        );
     }
 }

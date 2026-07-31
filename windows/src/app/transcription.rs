@@ -77,18 +77,18 @@ fn run_worker(jobs: Receiver<ChunkJob>, events: Sender<TranscriptionEvent>, ui_w
     let status_wake = ui_wake.clone();
     let engine = AsrEngine::load_with_status(move |message| {
         let _ = status_events.send(TranscriptionEvent::EngineStatus(message));
-        status_wake.request_repaint();
+        status_wake.request_root_repaint();
     });
 
     let engine = match engine {
         Ok(engine) => {
             let _ = events.send(TranscriptionEvent::EngineReady(Ok(engine.clone())));
-            ui_wake.request_repaint();
+            ui_wake.request_root_repaint();
             engine
         }
         Err(error) => {
             let _ = events.send(TranscriptionEvent::EngineReady(Err(format!("{error:#}"))));
-            ui_wake.request_repaint();
+            ui_wake.request_root_repaint();
             return;
         }
     };
@@ -99,6 +99,6 @@ fn run_worker(jobs: Receiver<ChunkJob>, events: Sender<TranscriptionEvent>, ui_w
             .transcribe_labeled(&job.audio, Some(&label))
             .map_err(|error| format!("{error:#}"));
         let _ = events.send(TranscriptionEvent::ChunkDone { id: job.id, result });
-        ui_wake.request_repaint();
+        ui_wake.request_root_repaint();
     }
 }

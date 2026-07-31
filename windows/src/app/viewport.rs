@@ -85,12 +85,13 @@ fn configure_control_viewport(ctx: &egui::Context) {
 
 fn configure_notification_viewport(app: &LocalSttApp, ctx: &egui::Context) {
     let monitor = monitor_size(ctx);
-    let overlay_width = if app.settings.open {
+    let settings_visible = app.settings_window.is_visible();
+    let overlay_width = if settings_visible {
         coexisting_window_width(monitor.x, CARD_W)
     } else {
         CARD_W.min((monitor.x - WINDOW_EDGE_MARGIN).max(MIN_PARALLEL_WINDOW_WIDTH))
     };
-    let position = notification_position(monitor, overlay_width, app.settings.open);
+    let position = notification_position(monitor, overlay_width, settings_visible);
 
     apply_root_chrome(ctx, RootViewportMode::Notification.chrome());
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));

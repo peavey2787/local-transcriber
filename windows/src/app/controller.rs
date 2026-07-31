@@ -16,7 +16,7 @@ use crate::ui_wake::UiWake;
 
 use super::lifecycle::WindowLifecycle;
 use super::recording::LiveSession;
-use super::settings::{SettingsDeviceDiscovery, SettingsState};
+use super::settings::{SettingsDeviceDiscovery, SettingsState, SettingsWindowState};
 use super::theme;
 use super::transcription::TranscriptionWorker;
 
@@ -37,6 +37,7 @@ pub struct LocalSttApp {
     pub(super) startup_status: String,
     pub(super) paste_target: Option<PasteTarget>,
     pub(super) settings: SettingsState,
+    pub(super) settings_window: SettingsWindowState,
     pub(super) settings_device_discovery: SettingsDeviceDiscovery,
     pub(super) hotkey_problem: Option<String>,
     pub(super) lifecycle: WindowLifecycle,
@@ -106,6 +107,7 @@ impl LocalSttApp {
             started: Instant::now(),
             last_frame: Instant::now(),
             settings: SettingsState::from_config(&config),
+            settings_window: SettingsWindowState::default(),
             settings_device_discovery,
             config,
             startup_status,
@@ -168,7 +170,7 @@ impl LocalSttApp {
     }
 
     fn request_next_frame(&self, ctx: &egui::Context) {
-        let busy = self.settings.open
+        let busy = self.settings_window.is_visible()
             || self.recording_pipeline_busy()
             || self.overlay.is_visible()
             || self.engine.is_none();
@@ -177,9 +179,9 @@ impl LocalSttApp {
     }
 
     fn render(&mut self, ctx: &egui::Context) {
-        if self.settings.open {
-            self.render_settings(ctx);
-        }
+        // The Settings viewport is independent of the persistent root.
+        // It exists only while requested and can be reopened with the same ID.
+        self.render_settings(ctx);
 
         if matches!(&self.overlay.state, OverlayState::Hidden) && self.overlay.alpha < 0.01 {
             egui::CentralPanel::default()

@@ -23,14 +23,11 @@ impl SettingsChanges {
 }
 
 pub(in crate::app) struct SettingsState {
-    pub(in crate::app) open: bool,
-    pub(in crate::app) focus_pending: bool,
     pub(super) hotkey: String,
     pub(super) capturing_hotkey: bool,
     pub(super) recording_device: Option<InputDeviceSelection>,
     pub(super) input_devices: Vec<InputDeviceOption>,
     devices_loading: bool,
-    has_device_snapshot: bool,
     pub(super) auto_paste: bool,
     pub(super) notification_duration_seconds: u32,
     pub(super) loading_notifications: bool,
@@ -43,14 +40,11 @@ pub(in crate::app) struct SettingsState {
 impl SettingsState {
     pub(in crate::app) fn from_config(config: &Config) -> Self {
         let mut state = Self {
-            open: false,
-            focus_pending: false,
             hotkey: String::new(),
             capturing_hotkey: false,
             recording_device: None,
             input_devices: Vec::new(),
             devices_loading: false,
-            has_device_snapshot: false,
             auto_paste: false,
             notification_duration_seconds: 0,
             loading_notifications: false,
@@ -63,10 +57,11 @@ impl SettingsState {
         state
     }
 
-    pub(super) fn load_from_config(&mut self, config: &Config) {
+    fn load_from_config(&mut self, config: &Config) {
         self.hotkey.clone_from(&config.hotkey);
         self.capturing_hotkey = false;
         self.recording_device.clone_from(&config.recording_device);
+        self.ensure_saved_device_choices();
         self.auto_paste = config.auto_paste;
         self.notification_duration_seconds = config
             .notification_duration_seconds
@@ -80,10 +75,6 @@ impl SettingsState {
 
     pub(in crate::app) fn is_capturing_hotkey(&self) -> bool {
         self.capturing_hotkey
-    }
-
-    pub(super) fn should_scan_devices_on_open(&self) -> bool {
-        !self.has_device_snapshot && !self.devices_loading
     }
 
     pub(super) fn begin_device_scan(&mut self) -> bool {
@@ -103,9 +94,13 @@ impl SettingsState {
     }
 
     pub(super) fn replace_input_devices(&mut self, options: Vec<InputDeviceOption>) -> usize {
+        let device_count = options
+            .iter()
+            .filter(|option| option.selection.is_some())
+            .count();
         self.input_devices = options;
-        self.has_device_snapshot = true;
-        self.input_devices.len().saturating_sub(1)
+        self.ensure_saved_device_choices();
+        device_count
     }
 
     pub(super) fn selected_device_label(&self) -> String {
@@ -116,7 +111,7 @@ impl SettingsState {
             .unwrap_or_else(|| {
                 self.recording_device
                     .as_ref()
-                    .map(|_| "Unavailable recording device".to_string())
+                    .map(saved_device_label)
                     .unwrap_or_else(|| "System default".to_string())
             })
     }
@@ -127,6 +122,50 @@ impl SettingsState {
             ok,
         });
     }
+
+    fn ensure_saved_device_choices(&mut self) {
+        if !self
+            .input_devices
+            .iter()
+            .any(|option| option.selection.is_none())
+        {
+            self.input_devices.insert(
+                0,
+                InputDeviceOption {
+                    selection: None,
+                    label: "System default".to_string(),
+                },
+            );
+        }
+
+        let Some(selection) = self.recording_device.as_ref() else {
+            return;
+        };
+        if self
+            .input_devices
+            .iter()
+            .any(|option| option.selection.as_ref() == Some(selection))
+        {
+            return;
+        }
+
+        self.input_devices.push(InputDeviceOption {
+            selection: Some(selection.clone()),
+            label: saved_device_label(selection),
+        });
+    }
+}
+
+fn saved_device_label(selection: &InputDeviceSelection) -> String {
+    if selection.occurrence == 0 {
+        format!("{} — saved device", selection.name)
+    } else {
+        format!(
+            "{} ({}) — saved device",
+            selection.name,
+            selection.occurrence + 1
+        )
+    }
 }
 
 #[cfg(test)]
@@ -134,24 +173,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn automatic_device_scan_runs_only_for_the_first_settings_open() {
-        let mut state = SettingsState::from_config(&Config::default());
-        assert!(state.should_scan_devices_on_open());
-        assert!(state.begin_device_scan());
-        assert!(!state.should_scan_devices_on_open());
-        state.replace_input_devices(Vec::new());
-        state.finish_device_scan();
-        state.load_from_config(&Config::default());
-        assert!(!state.should_scan_devices_on_open());
-    }
+    fn settings_opening_uses_saved_choices_without_scanning_windows_audio() {
+        let mut config = Config::default();
+        config.recording_device = Some(InputDeviceSelection {
+            name: "USB Microphone".to_string(),
+            occurrence: 0,
+        });
 
-    #[test]
-    fn failed_initial_scan_can_retry_on_the_next_open() {
-        let mut state = SettingsState::from_config(&Config::default());
-        assert!(state.begin_device_scan());
-        state.finish_device_scan();
-        state.load_from_config(&Config::default());
-        assert!(state.should_scan_devices_on_open());
+        let state = SettingsState::from_config(&config);
+
+        assert_eq!(state.input_devices.len(), 2);
+        assert_eq!(state.input_devices[0].selection, None);
+        assert_eq!(state.selected_device_label(), "USB Microphone — saved device");
+        assert!(!state.is_scanning_devices());
     }
 
     #[test]
@@ -162,5 +196,27 @@ mod tests {
         assert!(state.is_scanning_devices());
         state.finish_device_scan();
         assert!(state.begin_device_scan());
+    }
+
+    #[test]
+    fn refreshed_choices_preserve_an_unavailable_saved_device() {
+        let mut config = Config::default();
+        config.recording_device = Some(InputDeviceSelection {
+            name: "Disconnected microphone".to_string(),
+            occurrence: 1,
+        });
+        let mut state = SettingsState::from_config(&config);
+
+        let discovered = state.replace_input_devices(vec![InputDeviceOption {
+            selection: None,
+            label: "System default — Microphone Array".to_string(),
+        }]);
+
+        assert_eq!(discovered, 0);
+        assert_eq!(state.input_devices.len(), 2);
+        assert_eq!(
+            state.selected_device_label(),
+            "Disconnected microphone (2) — saved device"
+        );
     }
 }

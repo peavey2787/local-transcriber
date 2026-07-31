@@ -1,4 +1,4 @@
-//! Native Settings viewport lifecycle and geometry.
+//! Independent Settings viewport lifecycle and geometry.
 
 use eframe::egui;
 
@@ -6,15 +6,20 @@ use super::super::super::controller::LocalSttApp;
 use super::super::super::viewport::{coexisting_window_width, WINDOW_EDGE_MARGIN};
 
 const SETTINGS_VIEWPORT_ID: &str = "local-stt-settings";
+const SETTINGS_WINDOW_TITLE: &str = "local-stt settings";
 const SETTINGS_W: f32 = 720.0;
 const SETTINGS_H: f32 = 780.0;
 
 impl LocalSttApp {
     pub(in crate::app) fn render_settings(&mut self, root_ctx: &egui::Context) {
+        if !self.settings_window.is_visible() {
+            return;
+        }
+
         let (position, size) =
             settings_viewport_geometry(monitor_size(root_ctx), self.overlay.is_visible());
         let builder = egui::ViewportBuilder::default()
-            .with_title("local-stt settings")
+            .with_title(SETTINGS_WINDOW_TITLE)
             .with_icon(self.app_icon.clone())
             .with_position(position)
             .with_inner_size(size)
@@ -27,16 +32,19 @@ impl LocalSttApp {
             settings_viewport_id(),
             builder,
             |settings_ctx, _class| {
-                if self.settings.focus_pending {
+                if self.settings_window.take_focus_request() {
                     settings_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-                    self.settings.focus_pending = false;
                 }
+
                 self.draw_settings(settings_ctx);
                 settings_ctx.input(|input| input.viewport().close_requested())
             },
         );
 
-        if close_requested && self.settings.open {
+        if close_requested {
+            // Stop presenting this child viewport. The persistent root viewport,
+            // tray, hotkey, notifications, and workers remain alive. A later
+            // Settings command recreates the child with the same stable ID.
             self.close_settings();
             root_ctx.request_repaint_of(egui::ViewportId::ROOT);
         }

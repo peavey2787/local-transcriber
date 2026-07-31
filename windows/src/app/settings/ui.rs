@@ -98,14 +98,20 @@ impl LocalSttApp {
         let before = self.settings.recording_device.clone();
         let options = self.settings.input_devices.clone();
         let recording_active = self.recording_pipeline_busy();
+        let scanning_devices = self.settings.is_scanning_devices();
+        let selected_text = if scanning_devices && options.is_empty() {
+            "Scanning recording devices…".to_string()
+        } else {
+            self.settings.selected_device_label()
+        };
         let refresh_requested = ui
             .horizontal(|ui| {
                 let button_width = 138.0;
                 let combo_width =
                     (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(160.0);
-                ui.add_enabled_ui(!recording_active, |ui| {
+                ui.add_enabled_ui(!recording_active && !scanning_devices, |ui| {
                     egui::ComboBox::from_id_salt("recording-device")
-                        .selected_text(self.settings.selected_device_label())
+                        .selected_text(selected_text)
                         .width(combo_width)
                         .show_ui(ui, |ui| {
                             for option in options {
@@ -117,12 +123,29 @@ impl LocalSttApp {
                             }
                         });
                 });
-                ui.add_sized([button_width, 30.0], egui::Button::new("Refresh devices"))
-                    .on_hover_text("Scan again after connecting or disconnecting a microphone")
-                    .clicked()
+                ui.add_enabled_ui(!scanning_devices, |ui| {
+                    ui.add_sized(
+                        [button_width, 30.0],
+                        egui::Button::new(if scanning_devices {
+                            "Scanning…"
+                        } else {
+                            "Refresh devices"
+                        }),
+                    )
+                })
+                .inner
+                .on_hover_text("Scan again after connecting or disconnecting a microphone")
+                .clicked()
             })
             .inner;
-        if recording_active {
+        if scanning_devices {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(help_text(
+                    "Windows is scanning recording devices in the background. Settings, notifications, hotkeys, and tray commands remain responsive.",
+                ));
+            });
+        } else if recording_active {
             ui.label(help_text(
                 "The microphone choice is locked only while recording or finishing transcription; all other Settings controls remain available.",
             ));

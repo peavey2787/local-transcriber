@@ -10,20 +10,26 @@ use super::state::SettingsChanges;
 
 impl LocalSttApp {
     pub(in crate::app) fn open_settings(&mut self) {
+        if self.settings.open {
+            self.settings.focus_pending = true;
+            return;
+        }
+
         self.settings.load_from_config(&self.config);
-        self.refresh_recording_devices(false);
-        let hotkey_message = if self.settings.message.is_none() {
-            self.hotkey_problem
-                .as_ref()
-                .map(|problem| format!("{problem} Choose a different shortcut."))
-        } else {
-            None
-        };
+        self.settings.open = true;
+        self.settings.focus_pending = true;
+
+        let hotkey_message = self
+            .hotkey_problem
+            .as_ref()
+            .map(|problem| format!("{problem} Choose a different shortcut."));
         if let Some(message) = hotkey_message {
             self.settings.set_message(message, false);
         }
-        self.settings.open = true;
-        self.settings.focus_pending = true;
+
+        if self.settings.should_scan_devices_on_open() {
+            self.request_recording_device_scan(false);
+        }
     }
 
     pub(super) fn apply_settings_changes(&mut self, changes: SettingsChanges) {
@@ -36,7 +42,7 @@ impl LocalSttApp {
         let mut success_message = "Saved automatically.".to_string();
 
         if changes.refresh_devices {
-            self.refresh_recording_devices(true);
+            self.request_recording_device_scan(true);
         }
 
         if changes.preferences {
@@ -112,24 +118,43 @@ impl LocalSttApp {
         }
     }
 
-    fn refresh_recording_devices(&mut self, announce_success: bool) {
-        match self.settings.refresh_input_devices() {
-            Ok(device_count) if announce_success => {
-                let noun = if device_count == 1 {
-                    "device"
-                } else {
-                    "devices"
-                };
-                self.settings.set_message(
-                    format!("Recording devices refreshed. Found {device_count} {noun}."),
-                    true,
-                );
+    fn request_recording_device_scan(&mut self, announce_success: bool) {
+        if !self.settings.begin_device_scan() {
+            if announce_success {
+                self.settings
+                    .set_message("A recording-device scan is already in progress.", false);
             }
-            Ok(_) => {}
-            Err(error) => self.settings.set_message(
-                format!("Could not list recording devices: {error:#}"),
-                false,
-            ),
+            return;
+        }
+
+        if let Err(message) = self
+            .settings_device_discovery
+            .request(announce_success)
+        {
+            self.settings.finish_device_scan();
+            self.settings.set_message(message, false);
+        }
+    }
+
+    pub(in crate::app) fn poll_settings_workers(&mut self) {
+        while let Some(result) = self.settings_device_discovery.try_recv() {
+            self.settings.finish_device_scan();
+            match result.options {
+                Ok(options) => {
+                    let device_count = self.settings.replace_input_devices(options);
+                    if result.announce_success {
+                        let noun = if device_count == 1 { "device" } else { "devices" };
+                        self.settings.set_message(
+                            format!("Recording devices refreshed. Found {device_count} {noun}."),
+                            true,
+                        );
+                    }
+                }
+                Err(error) => self.settings.set_message(
+                    format!("Could not list recording devices: {error}"),
+                    false,
+                ),
+            }
         }
     }
 

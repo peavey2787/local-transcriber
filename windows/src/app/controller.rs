@@ -16,7 +16,7 @@ use crate::ui_wake::UiWake;
 
 use super::lifecycle::WindowLifecycle;
 use super::recording::LiveSession;
-use super::settings::SettingsState;
+use super::settings::{SettingsDeviceDiscovery, SettingsState};
 use super::theme;
 use super::transcription::TranscriptionWorker;
 
@@ -37,6 +37,7 @@ pub struct LocalSttApp {
     pub(super) startup_status: String,
     pub(super) paste_target: Option<PasteTarget>,
     pub(super) settings: SettingsState,
+    pub(super) settings_device_discovery: SettingsDeviceDiscovery,
     pub(super) hotkey_problem: Option<String>,
     pub(super) lifecycle: WindowLifecycle,
 }
@@ -79,6 +80,7 @@ impl LocalSttApp {
             Err(error) => return Err(error),
         };
         let transcription = TranscriptionWorker::spawn(ui_wake.clone())?;
+        let settings_device_discovery = SettingsDeviceDiscovery::spawn(ui_wake.clone())?;
         let mut overlay = Overlay::default();
         let startup_status = "Starting local speech recognition…".to_string();
         if let Some(problem) = &hotkey_problem {
@@ -104,6 +106,7 @@ impl LocalSttApp {
             started: Instant::now(),
             last_frame: Instant::now(),
             settings: SettingsState::from_config(&config),
+            settings_device_discovery,
             config,
             startup_status,
             paste_target: None,
@@ -220,6 +223,7 @@ impl eframe::App for LocalSttApp {
         let dt = self.last_frame.elapsed().as_secs_f32().min(0.05);
         self.last_frame = Instant::now();
         self.poll_workers();
+        self.poll_settings_workers();
         self.pump_live_chunks();
         if self.handle_user_commands(ctx) {
             return;

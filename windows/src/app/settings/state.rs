@@ -1,8 +1,6 @@
 //! In-memory settings form state and audio-device choices.
 
-use anyhow::Result;
-
-use crate::audio::{input_device_options, InputDeviceOption, InputDeviceSelection};
+use crate::audio::{InputDeviceOption, InputDeviceSelection};
 use crate::config::{Config, MAX_NOTIFICATION_SECONDS, MIN_NOTIFICATION_SECONDS};
 
 pub(super) struct SettingsMessage {
@@ -31,6 +29,8 @@ pub(in crate::app) struct SettingsState {
     pub(super) capturing_hotkey: bool,
     pub(super) recording_device: Option<InputDeviceSelection>,
     pub(super) input_devices: Vec<InputDeviceOption>,
+    devices_loading: bool,
+    has_device_snapshot: bool,
     pub(super) auto_paste: bool,
     pub(super) notification_duration_seconds: u32,
     pub(super) loading_notifications: bool,
@@ -49,6 +49,8 @@ impl SettingsState {
             capturing_hotkey: false,
             recording_device: None,
             input_devices: Vec::new(),
+            devices_loading: false,
+            has_device_snapshot: false,
             auto_paste: false,
             notification_duration_seconds: 0,
             loading_notifications: false,
@@ -80,9 +82,30 @@ impl SettingsState {
         self.capturing_hotkey
     }
 
-    pub(super) fn refresh_input_devices(&mut self) -> Result<usize> {
-        self.input_devices = input_device_options()?;
-        Ok(self.input_devices.len().saturating_sub(1))
+    pub(super) fn should_scan_devices_on_open(&self) -> bool {
+        !self.has_device_snapshot && !self.devices_loading
+    }
+
+    pub(super) fn begin_device_scan(&mut self) -> bool {
+        if self.devices_loading {
+            return false;
+        }
+        self.devices_loading = true;
+        true
+    }
+
+    pub(super) fn finish_device_scan(&mut self) {
+        self.devices_loading = false;
+    }
+
+    pub(super) fn is_scanning_devices(&self) -> bool {
+        self.devices_loading
+    }
+
+    pub(super) fn replace_input_devices(&mut self, options: Vec<InputDeviceOption>) -> usize {
+        self.input_devices = options;
+        self.has_device_snapshot = true;
+        self.input_devices.len().saturating_sub(1)
     }
 
     pub(super) fn selected_device_label(&self) -> String {
@@ -103,5 +126,41 @@ impl SettingsState {
             text: text.into(),
             ok,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_device_scan_runs_only_for_the_first_settings_open() {
+        let mut state = SettingsState::from_config(&Config::default());
+        assert!(state.should_scan_devices_on_open());
+        assert!(state.begin_device_scan());
+        assert!(!state.should_scan_devices_on_open());
+        state.replace_input_devices(Vec::new());
+        state.finish_device_scan();
+        state.load_from_config(&Config::default());
+        assert!(!state.should_scan_devices_on_open());
+    }
+
+    #[test]
+    fn failed_initial_scan_can_retry_on_the_next_open() {
+        let mut state = SettingsState::from_config(&Config::default());
+        assert!(state.begin_device_scan());
+        state.finish_device_scan();
+        state.load_from_config(&Config::default());
+        assert!(state.should_scan_devices_on_open());
+    }
+
+    #[test]
+    fn duplicate_device_scans_are_rejected_without_blocking_the_ui() {
+        let mut state = SettingsState::from_config(&Config::default());
+        assert!(state.begin_device_scan());
+        assert!(!state.begin_device_scan());
+        assert!(state.is_scanning_devices());
+        state.finish_device_scan();
+        assert!(state.begin_device_scan());
     }
 }

@@ -21,8 +21,7 @@ mod util;
 use anyhow::Result;
 use eframe::egui;
 
-use crate::app::LocalSttApp;
-use crate::overlay::{CARD_H, CARD_W};
+use crate::app::{LocalSttApp, CONTROL_VIEWPORT_POSITION, CONTROL_VIEWPORT_SIZE};
 
 fn main() {
     if let Err(error) = run() {
@@ -55,9 +54,9 @@ fn run() -> Result<()> {
         cfg.auto_paste
     );
 
-    // The single native window becomes either a non-activating status overlay
-    // or the settings panel. When idle it is parked off-screen while the tray
-    // and global shortcut remain active.
+    // Keep the transparent root window on-screen so Windows continues servicing
+    // its event loop while the tray and global shortcut are idle. Settings use
+    // a separate viewport; transient notifications temporarily expand this one.
     let viewport = egui::ViewportBuilder::default()
         .with_title("local-stt")
         .with_icon(egui::IconData {
@@ -65,10 +64,11 @@ fn run() -> Result<()> {
             width: icon::APP_ICON_SIZE,
             height: icon::APP_ICON_SIZE,
         })
-        .with_inner_size([CARD_W, CARD_H])
-        .with_position([-32000.0, -32000.0])
+        .with_inner_size(CONTROL_VIEWPORT_SIZE)
+        .with_position(CONTROL_VIEWPORT_POSITION)
         .with_decorations(false)
         .with_transparent(true)
+        .with_mouse_passthrough(true)
         .with_always_on_top()
         .with_taskbar(false)
         .with_resizable(false)

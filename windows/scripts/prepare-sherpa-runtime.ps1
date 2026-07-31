@@ -16,15 +16,42 @@ $archivePath = Join-Path $cacheDirectory $archiveName
 $partialPath = "$archivePath.part"
 $receiptPath = Join-Path $runtimeRoot "runtime.sha256"
 
+function Get-NativeWindowsArchitecture {
+    $runtimeInformationType = [System.Runtime.InteropServices.RuntimeInformation]
+    $architectureProperty = $runtimeInformationType.GetProperty("OSArchitecture")
+    if ($null -ne $architectureProperty) {
+        $architecture = $architectureProperty.GetValue($null, $null)
+        if ($null -ne $architecture) {
+            return $architecture.ToString().ToUpperInvariant()
+        }
+    }
+
+    $architectureName = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITEW6432")
+    if ([System.String]::IsNullOrWhiteSpace($architectureName)) {
+        $architectureName = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITECTURE")
+    }
+    if ([System.String]::IsNullOrWhiteSpace($architectureName)) {
+        return "UNKNOWN"
+    }
+
+    switch ($architectureName.Trim().ToUpperInvariant()) {
+        "AMD64" { return "X64" }
+        "X86_64" { return "X64" }
+        "ARM64" { return "ARM64" }
+        "X86" { return "X86" }
+        "IA64" { return "IA64" }
+        default { return "UNKNOWN" }
+    }
+}
+
 function Assert-WindowsX64 {
     if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
         throw "This runtime preparation script supports only Windows."
     }
-    if (
-        [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne
-        [System.Runtime.InteropServices.Architecture]::X64
-    ) {
-        throw "This runtime preparation script currently supports only Windows x64."
+
+    $architecture = Get-NativeWindowsArchitecture
+    if ($architecture -ne "X64") {
+        throw "This runtime preparation script currently supports only Windows x64; detected '$architecture'."
     }
 }
 

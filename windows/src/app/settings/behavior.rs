@@ -110,7 +110,7 @@ impl LocalSttApp {
         }
     }
 
-    fn request_recording_device_scan(&mut self) {
+    pub(in crate::app) fn request_recording_device_scan(&mut self) {
         if !self.settings.begin_device_scan() {
             self.settings
                 .set_message("A recording-device scan is already in progress.", false);

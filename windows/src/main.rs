@@ -54,9 +54,9 @@ fn run() -> Result<()> {
         cfg.auto_paste
     );
 
-    // Keep one ordinary native root window alive for the entire process.
-    // Its Windows chrome is stable; only its position, size, title, and level
-    // change when presenting Settings or a notification.
+    // Keep one borderless, transparent native root window alive for the entire
+    // process. Settings and notifications draw their own content surfaces; the
+    // operating-system title bar and window buttons are never shown.
     let viewport = egui::ViewportBuilder::default()
         .with_title("local-stt")
         .with_icon(egui::IconData {
@@ -66,8 +66,8 @@ fn run() -> Result<()> {
         })
         .with_inner_size(CONTROL_VIEWPORT_SIZE)
         .with_position(CONTROL_VIEWPORT_POSITION)
-        .with_decorations(true)
-        .with_transparent(false)
+        .with_decorations(false)
+        .with_transparent(true)
         .with_mouse_passthrough(false)
         .with_always_on_top()
         .with_taskbar(false)

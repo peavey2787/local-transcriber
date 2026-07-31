@@ -94,7 +94,7 @@ impl LocalSttApp {
             overlay.show_loading(startup_status.clone());
         }
 
-        Ok(Self {
+        let mut app = Self {
             overlay,
             tray,
             hotkeys,
@@ -116,7 +116,9 @@ impl LocalSttApp {
             lifecycle: WindowLifecycle::default(),
             viewport: RootViewportState::default(),
             next_session_id: 1,
-        })
+        };
+        app.request_recording_device_scan();
+        Ok(app)
     }
 
     pub(super) fn now(&self) -> f64 {

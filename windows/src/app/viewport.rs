@@ -2,19 +2,21 @@
 //!
 //! The root window is created once and never destroyed during normal operation.
 //! Settings and notifications are mutually exclusive presentations of that same
-//! window. Native geometry is updated only when the presentation changes, which
-//! avoids repeatedly rebuilding Windows window chrome on every egui frame.
+//! borderless window. Geometry is updated only when presentation changes.
 
 use eframe::egui::{self, ViewportCommand};
 
 use crate::overlay::CARD_W;
+use crate::platform::primary_display_size_points;
 
 use super::controller::LocalSttApp;
 
 pub(crate) const CONTROL_VIEWPORT_POSITION: [f32; 2] = [-32_000.0, -32_000.0];
 pub(crate) const CONTROL_VIEWPORT_SIZE: [f32; 2] = [8.0, 8.0];
 const WINDOW_EDGE_MARGIN: f32 = 24.0;
+const NOTIFICATION_TOP_MARGIN: f32 = 48.0;
 const MIN_WINDOW_WIDTH: f32 = 360.0;
+const MIN_SETTINGS_HEIGHT: f32 = 420.0;
 const SETTINGS_W: f32 = 720.0;
 const SETTINGS_H: f32 = 780.0;
 
@@ -95,54 +97,70 @@ impl LocalSttApp {
 }
 
 fn configure_control_viewport(ctx: &egui::Context) {
+    apply_borderless_window_policy(ctx, egui::WindowLevel::Normal);
     ctx.send_viewport_cmd(ViewportCommand::Title("local-stt".to_string()));
-    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
-    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
-        CONTROL_VIEWPORT_POSITION[0],
-        CONTROL_VIEWPORT_POSITION[1],
-    )));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(
         CONTROL_VIEWPORT_SIZE[0],
         CONTROL_VIEWPORT_SIZE[1],
     )));
+    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
+        CONTROL_VIEWPORT_POSITION[0],
+        CONTROL_VIEWPORT_POSITION[1],
+    )));
 }
 
 fn configure_notification_viewport(height: f32, ctx: &egui::Context) {
-    let monitor = monitor_size(ctx);
-    let width = CARD_W.min((monitor.x - WINDOW_EDGE_MARGIN).max(MIN_WINDOW_WIDTH));
-    let position = egui::pos2(((monitor.x - width) * 0.5).max(0.0), 70.0);
-
+    let (position, size) = notification_viewport_geometry(display_size(), height);
+    apply_borderless_window_policy(ctx, egui::WindowLevel::AlwaysOnTop);
     ctx.send_viewport_cmd(ViewportCommand::Title("local-stt notification".to_string()));
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(
-        egui::WindowLevel::AlwaysOnTop,
-    ));
+    ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
-    ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(width, height)));
 }
 
 fn configure_settings_viewport(ctx: &egui::Context) {
-    let (position, size) = settings_viewport_geometry(monitor_size(ctx));
+    let (position, size) = settings_viewport_geometry(display_size());
+    apply_borderless_window_policy(ctx, egui::WindowLevel::AlwaysOnTop);
     ctx.send_viewport_cmd(ViewportCommand::Title("local-stt settings".to_string()));
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(
-        egui::WindowLevel::AlwaysOnTop,
-    ));
-    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
+    ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
 }
 
-fn settings_viewport_geometry(monitor: egui::Vec2) -> (egui::Pos2, egui::Vec2) {
-    let width = SETTINGS_W.min((monitor.x - WINDOW_EDGE_MARGIN).max(MIN_WINDOW_WIDTH));
-    let height = SETTINGS_H.min((monitor.y - 40.0).max(420.0));
-    let x = ((monitor.x - width) * 0.5).max(0.0);
-    let y = ((monitor.y - height) * 0.35).max(20.0);
+fn apply_borderless_window_policy(ctx: &egui::Context, level: egui::WindowLevel) {
+    ctx.send_viewport_cmd(ViewportCommand::Decorations(false));
+    ctx.send_viewport_cmd(ViewportCommand::Transparent(true));
+    ctx.send_viewport_cmd(ViewportCommand::Resizable(false));
+    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(level));
+}
+
+fn notification_viewport_geometry(
+    display: egui::Vec2,
+    requested_height: f32,
+) -> (egui::Pos2, egui::Vec2) {
+    let width =
+        CARD_W.min((display.x - WINDOW_EDGE_MARGIN * 2.0).max(MIN_WINDOW_WIDTH));
+    let height =
+        requested_height.min((display.y - WINDOW_EDGE_MARGIN * 2.0).max(1.0));
+    let x = ((display.x - width) * 0.5).max(0.0);
+    let y = NOTIFICATION_TOP_MARGIN.min((display.y - height).max(0.0));
     (egui::pos2(x, y), egui::vec2(width, height))
 }
 
-fn monitor_size(ctx: &egui::Context) -> egui::Vec2 {
-    ctx.input(|input| input.viewport().monitor_size)
-        .unwrap_or(egui::vec2(1920.0, 1080.0))
+fn settings_viewport_geometry(display: egui::Vec2) -> (egui::Pos2, egui::Vec2) {
+    let width =
+        SETTINGS_W.min((display.x - WINDOW_EDGE_MARGIN * 2.0).max(MIN_WINDOW_WIDTH));
+    let height = SETTINGS_H.min(
+        (display.y - WINDOW_EDGE_MARGIN * 2.0).max(MIN_SETTINGS_HEIGHT),
+    );
+    let x = ((display.x - width) * 0.5).max(0.0);
+    let y = ((display.y - height) * 0.5).max(0.0);
+    (egui::pos2(x, y), egui::vec2(width, height))
+}
+
+fn display_size() -> egui::Vec2 {
+    let [width, height] = primary_display_size_points();
+    egui::vec2(width, height)
 }
 
 #[cfg(test)]
@@ -188,14 +206,24 @@ mod tests {
     }
 
     #[test]
-    fn settings_window_is_centered_and_bounded_to_the_monitor() {
+    fn notification_is_top_centered() {
+        let (position, size) =
+            notification_viewport_geometry(egui::vec2(1920.0, 1080.0), 112.0);
+        assert_eq!(size, egui::vec2(CARD_W, 112.0));
+        assert_eq!(position, egui::pos2(580.0, NOTIFICATION_TOP_MARGIN));
+    }
+
+    #[test]
+    fn settings_window_is_centered_on_both_axes() {
         let (position, size) = settings_viewport_geometry(egui::vec2(1920.0, 1080.0));
         assert_eq!(size, egui::vec2(SETTINGS_W, SETTINGS_H));
-        assert_eq!(position.x, 600.0);
-        assert!(position.y >= 20.0);
+        assert_eq!(position, egui::pos2(600.0, 150.0));
 
-        let (_, compact_size) = settings_viewport_geometry(egui::vec2(640.0, 480.0));
-        assert!(compact_size.x <= 616.0);
-        assert!(compact_size.y <= 440.0);
+        let (compact_position, compact_size) =
+            settings_viewport_geometry(egui::vec2(640.0, 480.0));
+        assert!(compact_size.x <= 592.0);
+        assert!(compact_size.y <= 432.0);
+        assert_eq!(compact_position.x, (640.0 - compact_size.x) * 0.5);
+        assert_eq!(compact_position.y, (480.0 - compact_size.y) * 0.5);
     }
 }

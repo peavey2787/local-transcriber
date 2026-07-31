@@ -112,7 +112,7 @@ impl LocalSttApp {
         let options = self.settings.input_devices.clone();
         let recording_active = self.recording_pipeline_busy();
         let scanning_devices = self.settings.is_scanning_devices();
-        let selected_text = if scanning_devices && options.is_empty() {
+        let selected_text = if scanning_devices {
             "Scanning recording devices…".to_string()
         } else {
             self.settings.selected_device_label()

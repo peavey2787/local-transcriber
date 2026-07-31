@@ -2,8 +2,8 @@
 //!
 //! CPAL ultimately calls Windows audio APIs that can block while devices are
 //! being added, removed, or reconfigured. Device enumeration therefore never
-//! runs on eframe's sole GUI/event-loop thread and starts only from the manual
-//! Refresh devices button.
+//! runs on eframe's sole GUI/event-loop thread. One scan starts automatically
+//! during startup; later scans start only from the Refresh devices button.
 
 use anyhow::Context;
 use crossbeam_channel::{bounded, unbounded, Receiver, Sender, TrySendError};
@@ -20,7 +20,7 @@ pub(in crate::app) struct SettingsDeviceDiscovery {
 
 impl SettingsDeviceDiscovery {
     pub(in crate::app) fn spawn(ui_wake: UiWake) -> anyhow::Result<Self> {
-        // Only one manual scan may be pending. SettingsState also prevents
+        // Only one scan may be pending. SettingsState also prevents
         // duplicate requests, while this bound protects the worker boundary.
         let (requests, request_rx) = bounded::<()>(1);
         let (result_tx, results) = unbounded();

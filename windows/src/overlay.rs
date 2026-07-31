@@ -115,6 +115,13 @@ impl Overlay {
         self.dismiss_at = None;
     }
 
+    pub fn dismiss_immediately(&mut self) {
+        self.state = OverlayState::Hidden;
+        self.dismiss_at = None;
+        self.alpha = 0.0;
+        self.rms = 0.0;
+    }
+
     pub fn is_visible(&self) -> bool {
         !matches!(&self.state, OverlayState::Hidden) || self.alpha > 0.01
     }
@@ -335,6 +342,21 @@ mod tests {
         overlay.dismiss_at = None;
         overlay.tick(100.0, 0.016);
         assert!(matches!(overlay.state, OverlayState::Result { .. }));
+    }
+
+    #[test]
+    fn immediate_dismiss_removes_all_visible_notification_state() {
+        let mut overlay = Overlay::default();
+        overlay.show_notice("ready", true, 0.0, 30.0);
+        overlay.alpha = 0.95;
+        overlay.rms = 0.75;
+
+        overlay.dismiss_immediately();
+
+        assert!(matches!(overlay.state, OverlayState::Hidden));
+        assert_eq!(overlay.alpha, 0.0);
+        assert_eq!(overlay.rms, 0.0);
+        assert!(!overlay.is_visible());
     }
 
     #[test]

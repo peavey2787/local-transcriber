@@ -6,6 +6,10 @@ use super::controller::LocalSttApp;
 
 impl LocalSttApp {
     pub(super) fn present_transcription(&mut self, text: String) {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+            return;
+        }
         let now = self.now();
         if text.is_empty() {
             self.present_no_speech(now);
@@ -60,6 +64,10 @@ impl LocalSttApp {
         partial_text: String,
         errors: Vec<String>,
     ) {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+            return;
+        }
         let now = self.now();
         let summary = format!("Transcription failed for {} audio chunk(s).", errors.len());
         for error in &errors {
@@ -126,7 +134,7 @@ impl LocalSttApp {
     fn present_no_speech(&mut self, now: f64) {
         log::info!("recording completed without detected speech");
         if !self.config.show_result_notifications {
-            self.overlay.dismiss();
+            self.overlay.dismiss_immediately();
             return;
         }
         if self.config.auto_paste {
@@ -149,6 +157,10 @@ impl LocalSttApp {
 
     fn show_result_error(&mut self, message: String, now: f64) {
         log::error!("result delivery failed: {message}");
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+            return;
+        }
         if self.config.show_result_notifications {
             self.overlay
                 .show_notice(message, false, now, self.config.notification_seconds());

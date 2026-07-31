@@ -10,10 +10,13 @@ use super::state::SettingsChanges;
 
 impl LocalSttApp {
     pub(in crate::app) fn open_settings(&mut self) {
-        // Opening Settings changes visibility/focus only. The form was loaded
-        // during app startup and stays synchronized as changes are auto-saved.
-        if !self.settings_window.show() {
-            return;
+        // Settings owns the root window while it is open. Entering Settings
+        // immediately cancels recording/transcription presentation and removes
+        // every notification so the two modes can never overlap.
+        self.cancel_recording_for_settings();
+        let became_visible = self.settings_window.show();
+        if became_visible {
+            self.settings.capturing_hotkey = false;
         }
         if let Some(problem) = &self.hotkey_problem {
             self.settings
@@ -204,5 +207,6 @@ impl LocalSttApp {
     pub(in crate::app) fn close_settings(&mut self) {
         self.settings_window.hide();
         self.settings.capturing_hotkey = false;
+        self.overlay.dismiss_immediately();
     }
 }

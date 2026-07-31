@@ -1,9 +1,9 @@
-//! Presentation policy for the single persistent Windows root viewport.
+//! Native presentation policy for the single persistent Windows root window.
 //!
-//! The native root window is never destroyed during normal operation. It moves
-//! between three presentations: a tiny background control surface, the status
-//! notification, and Settings. Reusing the same native window avoids the child
-//! viewport create/close/recreate path that can stall eframe on Windows.
+//! The root window is created once and never destroyed during normal operation.
+//! Settings and notifications are mutually exclusive presentations of that same
+//! window. Native geometry is updated only when the presentation changes, which
+//! avoids repeatedly rebuilding Windows window chrome on every egui frame.
 
 use eframe::egui::{self, ViewportCommand};
 
@@ -11,7 +11,7 @@ use crate::overlay::CARD_W;
 
 use super::controller::LocalSttApp;
 
-pub(crate) const CONTROL_VIEWPORT_POSITION: [f32; 2] = [0.0, 0.0];
+pub(crate) const CONTROL_VIEWPORT_POSITION: [f32; 2] = [-32_000.0, -32_000.0];
 pub(crate) const CONTROL_VIEWPORT_SIZE: [f32; 2] = [8.0, 8.0];
 const WINDOW_EDGE_MARGIN: f32 = 24.0;
 const MIN_WINDOW_WIDTH: f32 = 360.0;
@@ -25,17 +25,30 @@ enum RootViewportMode {
     Settings,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewportChrome {
-    title: &'static str,
-    transparent: bool,
-    decorations: bool,
-    mouse_passthrough: bool,
-    resizable: bool,
-    close: bool,
-    minimized: bool,
-    maximize: bool,
-    level: egui::WindowLevel,
+#[derive(Debug, Default)]
+pub(super) struct RootViewportState {
+    applied_mode: Option<RootViewportMode>,
+    notification_height: Option<u32>,
+}
+
+impl RootViewportState {
+    fn mode_changed(&mut self, mode: RootViewportMode) -> bool {
+        if self.applied_mode == Some(mode) {
+            return false;
+        }
+        self.applied_mode = Some(mode);
+        self.notification_height = None;
+        true
+    }
+
+    fn notification_height_changed(&mut self, height: f32) -> bool {
+        let rounded = height.max(1.0).round() as u32;
+        if self.notification_height == Some(rounded) {
+            return false;
+        }
+        self.notification_height = Some(rounded);
+        true
+    }
 }
 
 impl RootViewportMode {
@@ -48,44 +61,6 @@ impl RootViewportMode {
             Self::Control
         }
     }
-
-    fn chrome(self) -> ViewportChrome {
-        match self {
-            Self::Control => ViewportChrome {
-                title: "local-stt",
-                transparent: true,
-                decorations: false,
-                mouse_passthrough: true,
-                resizable: false,
-                close: false,
-                minimized: false,
-                maximize: false,
-                level: egui::WindowLevel::AlwaysOnTop,
-            },
-            Self::Notification => ViewportChrome {
-                title: "local-stt",
-                transparent: true,
-                decorations: false,
-                mouse_passthrough: false,
-                resizable: false,
-                close: false,
-                minimized: false,
-                maximize: false,
-                level: egui::WindowLevel::AlwaysOnTop,
-            },
-            Self::Settings => ViewportChrome {
-                title: "local-stt settings",
-                transparent: false,
-                decorations: true,
-                mouse_passthrough: false,
-                resizable: false,
-                close: true,
-                minimized: true,
-                maximize: false,
-                level: egui::WindowLevel::Normal,
-            },
-        }
-    }
 }
 
 impl LocalSttApp {
@@ -94,32 +69,34 @@ impl LocalSttApp {
             self.settings_window.is_visible(),
             self.overlay.is_visible(),
         );
+        let mode_changed = self.viewport.mode_changed(mode);
+
         match mode {
-            RootViewportMode::Control => configure_control_viewport(ctx),
-            RootViewportMode::Notification => configure_notification_viewport(self, ctx),
-            RootViewportMode::Settings => configure_settings_viewport(self, ctx),
+            RootViewportMode::Control if mode_changed => configure_control_viewport(ctx),
+            RootViewportMode::Notification => {
+                let height = self.overlay.desired_height();
+                let height_changed = self.viewport.notification_height_changed(height);
+                if mode_changed || height_changed {
+                    configure_notification_viewport(height, ctx);
+                }
+            }
+            RootViewportMode::Settings => {
+                if mode_changed {
+                    configure_settings_viewport(ctx);
+                }
+                if self.settings_window.take_focus_request() {
+                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+            }
+            RootViewportMode::Control => {}
         }
     }
 }
 
-fn apply_root_chrome(ctx: &egui::Context, chrome: ViewportChrome) {
-    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-    ctx.send_viewport_cmd(ViewportCommand::Title(chrome.title.to_string()));
-    ctx.send_viewport_cmd(ViewportCommand::Transparent(chrome.transparent));
-    ctx.send_viewport_cmd(ViewportCommand::Decorations(chrome.decorations));
-    ctx.send_viewport_cmd(ViewportCommand::MousePassthrough(chrome.mouse_passthrough));
-    ctx.send_viewport_cmd(ViewportCommand::Resizable(chrome.resizable));
-    ctx.send_viewport_cmd(ViewportCommand::EnableButtons {
-        close: chrome.close,
-        minimized: chrome.minimized,
-        maximize: chrome.maximize,
-    });
-    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(chrome.level));
-}
-
 fn configure_control_viewport(ctx: &egui::Context) {
-    apply_root_chrome(ctx, RootViewportMode::Control.chrome());
+    ctx.send_viewport_cmd(ViewportCommand::Title("local-stt".to_string()));
+    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::Normal));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(
         CONTROL_VIEWPORT_POSITION[0],
         CONTROL_VIEWPORT_POSITION[1],
@@ -130,27 +107,29 @@ fn configure_control_viewport(ctx: &egui::Context) {
     )));
 }
 
-fn configure_notification_viewport(app: &LocalSttApp, ctx: &egui::Context) {
+fn configure_notification_viewport(height: f32, ctx: &egui::Context) {
     let monitor = monitor_size(ctx);
     let width = CARD_W.min((monitor.x - WINDOW_EDGE_MARGIN).max(MIN_WINDOW_WIDTH));
     let position = egui::pos2(((monitor.x - width) * 0.5).max(0.0), 70.0);
 
-    apply_root_chrome(ctx, RootViewportMode::Notification.chrome());
+    ctx.send_viewport_cmd(ViewportCommand::Title("local-stt notification".to_string()));
+    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(
+        egui::WindowLevel::AlwaysOnTop,
+    ));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
-    ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(
-        width,
-        app.overlay.desired_height(),
-    )));
+    ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(width, height)));
 }
 
-fn configure_settings_viewport(app: &mut LocalSttApp, ctx: &egui::Context) {
+fn configure_settings_viewport(ctx: &egui::Context) {
     let (position, size) = settings_viewport_geometry(monitor_size(ctx));
-    apply_root_chrome(ctx, RootViewportMode::Settings.chrome());
+    ctx.send_viewport_cmd(ViewportCommand::Title("local-stt settings".to_string()));
+    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(
+        egui::WindowLevel::AlwaysOnTop,
+    ));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
-    if app.settings_window.take_focus_request() {
-        ctx.send_viewport_cmd(ViewportCommand::Focus);
-    }
 }
 
 fn settings_viewport_geometry(monitor: egui::Vec2) -> (egui::Pos2, egui::Vec2) {
@@ -170,72 +149,42 @@ fn monitor_size(ctx: &egui::Context) -> egui::Vec2 {
 mod tests {
     use super::*;
 
-    fn root_commands(mode: RootViewportMode) -> Vec<ViewportCommand> {
-        let context = egui::Context::default();
-        let mut output = context.run(Default::default(), |ctx| {
-            apply_root_chrome(ctx, mode.chrome());
-        });
-        output
-            .viewport_output
-            .remove(&egui::ViewportId::ROOT)
-            .expect("root viewport output")
-            .commands
-    }
-
     #[test]
-    fn root_window_transitions_between_control_settings_and_notifications() {
+    fn settings_and_notifications_are_mutually_exclusive() {
         assert_eq!(
-            RootViewportMode::from_state(false, false),
-            RootViewportMode::Control
-        );
-        assert_eq!(
-            RootViewportMode::from_state(true, false),
+            RootViewportMode::from_state(true, true),
             RootViewportMode::Settings
         );
         assert_eq!(
             RootViewportMode::from_state(false, true),
             RootViewportMode::Notification
         );
-    }
-
-    #[test]
-    fn settings_take_priority_without_creating_a_child_viewport() {
         assert_eq!(
-            RootViewportMode::from_state(true, true),
-            RootViewportMode::Settings
+            RootViewportMode::from_state(false, false),
+            RootViewportMode::Control
         );
-        let commands = root_commands(RootViewportMode::Settings);
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, ViewportCommand::Decorations(true))));
-        assert!(commands.iter().any(|command| matches!(
-            command,
-            ViewportCommand::EnableButtons { close: true, .. }
-        )));
-        assert!(commands.iter().any(|command| matches!(
-            command,
-            ViewportCommand::WindowLevel(egui::WindowLevel::Normal)
-        )));
     }
 
     #[test]
-    fn control_viewport_stays_alive_and_click_through() {
-        assert!(CONTROL_VIEWPORT_POSITION
-            .into_iter()
-            .all(|value| value >= 0.0));
+    fn viewport_commands_are_applied_only_on_state_changes() {
+        let mut state = RootViewportState::default();
+        assert!(state.mode_changed(RootViewportMode::Settings));
+        assert!(!state.mode_changed(RootViewportMode::Settings));
+        assert!(state.mode_changed(RootViewportMode::Control));
+    }
+
+    #[test]
+    fn notification_resize_is_coalesced() {
+        let mut state = RootViewportState::default();
+        assert!(state.notification_height_changed(210.0));
+        assert!(!state.notification_height_changed(210.2));
+        assert!(state.notification_height_changed(360.0));
+    }
+
+    #[test]
+    fn background_control_window_is_parked_off_screen() {
+        assert!(CONTROL_VIEWPORT_POSITION.into_iter().all(|value| value < 0.0));
         assert!(CONTROL_VIEWPORT_SIZE.into_iter().all(|value| value > 0.0));
-        assert!(RootViewportMode::Control.chrome().mouse_passthrough);
-    }
-
-    #[test]
-    fn notification_viewport_remains_interactive_and_borderless() {
-        let commands = root_commands(RootViewportMode::Notification);
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, ViewportCommand::MousePassthrough(false))));
-        assert!(commands
-            .iter()
-            .any(|command| matches!(command, ViewportCommand::Decorations(false))));
     }
 
     #[test]

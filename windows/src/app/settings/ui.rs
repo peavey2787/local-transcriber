@@ -6,7 +6,6 @@ use super::super::controller::LocalSttApp;
 use super::state::SettingsChanges;
 use crate::config::{MAX_NOTIFICATION_SECONDS, MIN_NOTIFICATION_SECONDS};
 use crate::hotkey::{capture_shortcut, friendly_name, CaptureOutcome};
-use crate::overlay::OverlayAction;
 
 fn help_text(text: impl Into<String>) -> RichText {
     RichText::new(text).size(13.0).weak()
@@ -14,26 +13,7 @@ fn help_text(text: impl Into<String>) -> RichText {
 
 impl LocalSttApp {
     pub(in crate::app) fn render_settings(&mut self, ctx: &egui::Context) {
-        let mut overlay_action = None;
-        if self.overlay.is_visible() {
-            egui::TopBottomPanel::top("settings-notification")
-                .resizable(false)
-                .exact_height(self.overlay.desired_height() + 20.0)
-                .frame(
-                    egui::Frame::NONE
-                        .fill(Color32::from_rgb(14, 15, 15))
-                        .inner_margin(10.0),
-                )
-                .show(ctx, |ui| {
-                    ui.multiply_opacity(self.overlay.alpha);
-                    overlay_action = self.overlay.ui(ctx, ui);
-                });
-        }
-
         self.draw_settings(ctx);
-        if let Some(OverlayAction::CopyDone(text)) = overlay_action {
-            self.copy_edited_result(text);
-        }
     }
 
     fn draw_settings(&mut self, ctx: &egui::Context) {
@@ -175,12 +155,12 @@ impl LocalSttApp {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(help_text(
-                    "Windows is scanning recording devices in the background. Settings, notifications, hotkeys, and tray commands remain responsive.",
+                    "Windows is scanning recording devices in the background. Settings remains responsive.",
                 ));
             });
         } else if recording_active {
             ui.label(help_text(
-                "The microphone choice is locked only while recording or finishing transcription; all other Settings controls remain available.",
+                "The microphone choice is temporarily unavailable while the recording pipeline stops.",
             ));
         }
         (before != self.settings.recording_device, refresh_requested)

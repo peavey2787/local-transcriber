@@ -60,6 +60,6 @@ fn run_worker(
         if results.send(options).is_err() {
             return;
         }
-        ui_wake.request_root_repaint();
+        ui_wake.request_repaint();
     }
 }

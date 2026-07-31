@@ -14,7 +14,8 @@ const LIVE_CHUNK_SECS: u32 = 10;
 const LIVE_CHUNK_SAMPLES: usize = (SAMPLE_RATE as usize) * (LIVE_CHUNK_SECS as usize);
 
 pub(super) struct LiveSession {
-    next_id: usize,
+    id: u64,
+    next_chunk_id: usize,
     in_flight: usize,
     done: BTreeMap<usize, Result<String, String>>,
     expected: Option<usize>,
@@ -22,9 +23,10 @@ pub(super) struct LiveSession {
 }
 
 impl LiveSession {
-    fn new() -> Self {
+    fn new(id: u64) -> Self {
         Self {
-            next_id: 0,
+            id,
+            next_chunk_id: 0,
             in_flight: 0,
             done: BTreeMap::new(),
             expected: None,
@@ -72,14 +74,41 @@ impl LocalSttApp {
                 .is_some_and(|session| session.finishing)
     }
 
-    fn spawn_chunk(&mut self, id: usize, audio: Vec<f32>) {
-        if let Some(session) = self.session.as_mut() {
-            session.in_flight += 1;
+    pub(super) fn cancel_recording_for_settings(&mut self) {
+        if self.recording {
+            self.recording = false;
+            let _discarded_audio = self.recorder.stop();
+            log::info!("recording cancelled because Settings was opened");
         }
-        let secs = audio.len() as f32 / SAMPLE_RATE as f32;
-        log::info!("queued transcription chunk #{id} ({secs:.1}s)");
 
-        if let Err(error) = self.transcription.queue(id, audio) {
+        // Dropping the session invalidates every queued chunk from that session.
+        // Worker events include the session id, so late completions cannot leak
+        // into a later recording after Settings closes.
+        self.session = None;
+        self.paste_target = None;
+        self.overlay.dismiss_immediately();
+        if self.hotkey_problem.is_some() {
+            self.tray
+                .set_tooltip("local-stt — recording shortcut required; open Settings");
+        } else if self.engine.is_some() {
+            self.tray.set_tooltip("local-stt — Parakeet ready");
+        } else {
+            self.tray
+                .set_tooltip(&format!("local-stt — {}", self.startup_status));
+        }
+    }
+
+    fn spawn_chunk(&mut self, chunk_id: usize, audio: Vec<f32>) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let session_id = session.id;
+        session.in_flight += 1;
+
+        let secs = audio.len() as f32 / SAMPLE_RATE as f32;
+        log::info!("queued transcription session {session_id} chunk #{chunk_id} ({secs:.1}s)");
+
+        if let Err(error) = self.transcription.queue(session_id, chunk_id, audio) {
             let message = match error {
                 QueueError::Full => {
                     "recognizer queue is full; recording is arriving faster than it can be transcribed"
@@ -89,9 +118,13 @@ impl LocalSttApp {
                     "recognizer worker is no longer running".to_string()
                 }
             };
-            if let Some(session) = self.session.as_mut() {
+            if let Some(session) = self
+                .session
+                .as_mut()
+                .filter(|session| session.id == session_id)
+            {
                 session.in_flight = session.in_flight.saturating_sub(1);
-                session.done.insert(id, Err(message));
+                session.done.insert(chunk_id, Err(message));
             }
         }
     }
@@ -104,17 +137,19 @@ impl LocalSttApp {
             let Some(chunk) = self.recorder.take_prefix(LIVE_CHUNK_SAMPLES) else {
                 break;
             };
-            let id = {
-                let session = self.session.get_or_insert_with(LiveSession::new);
-                let id = session.next_id;
-                session.next_id += 1;
-                id
+            let Some(session) = self.session.as_mut() else {
+                break;
             };
-            self.spawn_chunk(id, chunk);
+            let chunk_id = session.next_chunk_id;
+            session.next_chunk_id += 1;
+            self.spawn_chunk(chunk_id, chunk);
         }
     }
 
     pub(super) fn toggle_record(&mut self) {
+        if self.settings_window.is_visible() {
+            return;
+        }
         if self.engine.is_none() {
             self.show_engine_loading_state();
             return;
@@ -135,7 +170,9 @@ impl LocalSttApp {
     }
 
     fn show_engine_loading_state(&mut self) {
-        if self.config.show_loading_notifications {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+        } else if self.config.show_loading_notifications {
             self.overlay.show_loading(self.startup_status.clone());
         } else {
             self.overlay.dismiss();
@@ -148,9 +185,11 @@ impl LocalSttApp {
             return;
         }
 
+        let session_id = self.next_session_id;
+        self.next_session_id = self.next_session_id.wrapping_add(1).max(1);
         self.paste_target = self.config.auto_paste.then(PasteTarget::capture);
         self.recording = true;
-        self.session = Some(LiveSession::new());
+        self.session = Some(LiveSession::new(session_id));
         if self.config.show_recording_notifications {
             self.overlay.show_listening();
         } else {
@@ -166,19 +205,26 @@ impl LocalSttApp {
         self.recording = false;
         let message = format!("Could not start microphone recording: {error:#}");
         eprintln!("[local-stt] {message}");
-        self.overlay.show_notice(
-            message,
-            false,
-            self.now(),
-            self.config.notification_seconds(),
-        );
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+        } else {
+            self.overlay.show_notice(
+                message,
+                false,
+                self.now(),
+                self.config.notification_seconds(),
+            );
+        }
         self.tray.set_tooltip("local-stt — microphone unavailable");
     }
 
     fn stop_recording(&mut self) {
         self.recording = false;
         let tail = self.recorder.stop();
-        let (id, expected) = self.finish_session_schedule();
+        let Some((chunk_id, expected)) = self.finish_session_schedule() else {
+            self.overlay.dismiss_immediately();
+            return;
+        };
 
         if self.config.show_transcribing_notifications {
             self.overlay.show_processing();
@@ -189,21 +235,21 @@ impl LocalSttApp {
         println!("[local-stt] stopped — expecting {expected} chunks");
 
         if tail.len() >= (SAMPLE_RATE as usize) * 3 / 10 {
-            self.spawn_chunk(id, tail);
+            self.spawn_chunk(chunk_id, tail);
         } else if let Some(session) = self.session.as_mut() {
-            session.done.insert(id, Ok(String::new()));
+            session.done.insert(chunk_id, Ok(String::new()));
         }
         self.try_finalize();
     }
 
-    fn finish_session_schedule(&mut self) -> (usize, usize) {
-        let session = self.session.get_or_insert_with(LiveSession::new);
-        let id = session.next_id;
-        session.next_id += 1;
+    fn finish_session_schedule(&mut self) -> Option<(usize, usize)> {
+        let session = self.session.as_mut()?;
+        let chunk_id = session.next_chunk_id;
+        session.next_chunk_id += 1;
         session.finishing = true;
-        let expected = id + 1;
+        let expected = chunk_id + 1;
         session.expected = Some(expected);
-        (id, expected)
+        Some((chunk_id, expected))
     }
 
     fn try_finalize(&mut self) {
@@ -237,16 +283,20 @@ impl LocalSttApp {
             TranscriptionEvent::EngineStatus(message) => self.handle_engine_status(message),
             TranscriptionEvent::EngineReady(Ok(engine)) => self.handle_engine_ready(engine),
             TranscriptionEvent::EngineReady(Err(error)) => self.handle_engine_error(error),
-            TranscriptionEvent::ChunkDone { id, result } => {
-                self.handle_chunk_done(id, result);
-            }
+            TranscriptionEvent::ChunkDone {
+                session_id,
+                chunk_id,
+                result,
+            } => self.handle_chunk_done(session_id, chunk_id, result),
         }
     }
 
     fn handle_engine_status(&mut self, message: String) {
         self.startup_status = message.clone();
         self.tray.set_tooltip(&format!("local-stt — {message}"));
-        if self.config.show_loading_notifications && self.hotkey_problem.is_none() {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+        } else if self.config.show_loading_notifications && self.hotkey_problem.is_none() {
             self.overlay.show_loading(message);
         } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
             self.overlay.dismiss();
@@ -258,7 +308,9 @@ impl LocalSttApp {
         self.tray
             .set_tooltip(&format!("local-stt — {}", engine.label()));
         self.engine = Some(engine);
-        if let Some(problem) = &self.hotkey_problem {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+        } else if let Some(problem) = &self.hotkey_problem {
             self.overlay.show_persistent_notice(
                 format!("{problem} Open the tray menu → Settings and choose another shortcut."),
                 false,
@@ -283,7 +335,9 @@ impl LocalSttApp {
     fn handle_engine_error(&mut self, error: String) {
         self.startup_status = format!("Model load failed: {error}");
         self.tray.set_tooltip("local-stt — model load failed");
-        if self.config.show_loading_notifications {
+        if self.settings_window.is_visible() {
+            self.overlay.dismiss_immediately();
+        } else if self.config.show_loading_notifications {
             self.overlay.show_notice(
                 self.startup_status.clone(),
                 false,
@@ -295,11 +349,22 @@ impl LocalSttApp {
         }
     }
 
-    fn handle_chunk_done(&mut self, id: usize, result: Result<String, String>) {
-        if let Some(session) = self.session.as_mut() {
-            session.in_flight = session.in_flight.saturating_sub(1);
-            session.done.insert(id, result);
-        }
+    fn handle_chunk_done(
+        &mut self,
+        session_id: u64,
+        chunk_id: usize,
+        result: Result<String, String>,
+    ) {
+        let Some(session) = self
+            .session
+            .as_mut()
+            .filter(|session| session.id == session_id)
+        else {
+            log::debug!("discarding stale transcription session {session_id} chunk #{chunk_id}");
+            return;
+        };
+        session.in_flight = session.in_flight.saturating_sub(1);
+        session.done.insert(chunk_id, result);
         self.try_finalize();
     }
 }
@@ -310,7 +375,7 @@ mod tests {
 
     #[test]
     fn session_preserves_chunk_order_and_reports_errors() {
-        let mut session = LiveSession::new();
+        let mut session = LiveSession::new(7);
         session.done.insert(2, Ok("third".into()));
         session.done.insert(0, Ok("first".into()));
         session.done.insert(1, Err("decoder failed".into()));
@@ -324,7 +389,7 @@ mod tests {
 
     #[test]
     fn session_is_complete_only_after_expected_work_finishes() {
-        let mut session = LiveSession::new();
+        let mut session = LiveSession::new(9);
         session.finishing = true;
         session.expected = Some(2);
         session.in_flight = 1;

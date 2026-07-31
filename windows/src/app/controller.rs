@@ -14,11 +14,12 @@ use crate::platform::PasteTarget;
 use crate::tray::{Tray, TrayAction};
 use crate::ui_wake::UiWake;
 
-use super::lifecycle::WindowLifecycle;
+use super::lifecycle::{CloseDecision, WindowLifecycle};
 use super::recording::LiveSession;
 use super::settings::{SettingsDeviceDiscovery, SettingsState, SettingsWindowState};
 use super::theme;
 use super::transcription::TranscriptionWorker;
+use super::viewport::RootViewportState;
 
 pub struct LocalSttApp {
     pub(super) overlay: Overlay,
@@ -40,6 +41,8 @@ pub struct LocalSttApp {
     pub(super) settings_device_discovery: SettingsDeviceDiscovery,
     pub(super) hotkey_problem: Option<String>,
     pub(super) lifecycle: WindowLifecycle,
+    pub(super) viewport: RootViewportState,
+    pub(super) next_session_id: u64,
 }
 
 impl LocalSttApp {
@@ -111,6 +114,8 @@ impl LocalSttApp {
             paste_target: None,
             hotkey_problem,
             lifecycle: WindowLifecycle::default(),
+            viewport: RootViewportState::default(),
+            next_session_id: 1,
         })
     }
 
@@ -130,41 +135,49 @@ impl LocalSttApp {
         }
 
         let hotkey_pressed = self.hotkeys.poll_toggle();
-        if should_toggle_recording(
-            self.hotkeys.is_bound(),
-            hotkey_pressed,
-            self.settings.is_capturing_hotkey(),
-        ) {
-            self.toggle_record();
-        }
-
         if matches!(tray_action, Some(TrayAction::Settings)) {
             log::debug!("handling tray Settings command");
             self.open_settings();
+            return false;
+        }
+
+        if should_toggle_recording(
+            self.hotkeys.is_bound(),
+            hotkey_pressed,
+            self.settings_window.is_visible(),
+            self.settings.is_capturing_hotkey(),
+        ) {
+            self.toggle_record();
         }
         false
     }
 
     fn handle_window_close(&mut self, ctx: &egui::Context) -> bool {
         let close_requested = ctx.input(|input| input.viewport().close_requested());
-        if !close_requested {
-            return false;
+        match self.lifecycle.decide(close_requested) {
+            CloseDecision::None => false,
+            CloseDecision::Exit => true,
+            CloseDecision::CancelAndHide => {
+                // Cancel the native close first and defer viewport movement until
+                // the next frame. Settings is a presentation of the persistent
+                // root window, not the process lifetime owner.
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                if self.settings_window.is_visible() {
+                    self.close_settings();
+                } else {
+                    self.overlay.dismiss_immediately();
+                }
+                ctx.request_repaint();
+                true
+            }
+            CloseDecision::ContinueAfterCancel => {
+                // Some Windows/winit combinations report the same close request
+                // for multiple frames. Keep cancelling it, but do not starve
+                // tray commands, hotkeys, worker events, or viewport updates.
+                ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+                false
+            }
         }
-        if !self.lifecycle.should_cancel_close(close_requested) {
-            return true;
-        }
-
-        // The root viewport owns the process lifetime. Its native close button is
-        // used only while Settings is being presented, so close means "hide
-        // Settings" rather than "destroy the application".
-        ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-        if self.settings_window.is_visible() {
-            self.close_settings();
-            ctx.request_repaint();
-        } else {
-            self.overlay.dismiss();
-        }
-        false
     }
 
     fn advance_frame_state(&mut self, dt: f32) {
@@ -212,9 +225,13 @@ impl LocalSttApp {
 fn should_toggle_recording(
     hotkey_is_bound: bool,
     hotkey_pressed: bool,
+    settings_visible: bool,
     capturing_replacement_hotkey: bool,
 ) -> bool {
-    hotkey_is_bound && hotkey_pressed && !capturing_replacement_hotkey
+    hotkey_is_bound
+        && hotkey_pressed
+        && !settings_visible
+        && !capturing_replacement_hotkey
 }
 
 impl eframe::App for LocalSttApp {
@@ -230,12 +247,16 @@ impl eframe::App for LocalSttApp {
 
         let dt = self.last_frame.elapsed().as_secs_f32().min(0.05);
         self.last_frame = Instant::now();
-        self.poll_workers();
-        self.poll_settings_workers();
-        self.pump_live_chunks();
+
+        // Tray Settings/Quit commands have priority over worker completions and
+        // recording hotkeys. Opening Settings therefore cancels the active
+        // pipeline before a queued transcription can publish another result.
         if self.handle_user_commands(ctx) {
             return;
         }
+        self.poll_workers();
+        self.poll_settings_workers();
+        self.pump_live_chunks();
 
         self.advance_frame_state(dt);
         self.sync_root_viewport(ctx);
@@ -249,12 +270,17 @@ mod tests {
     use super::should_toggle_recording;
 
     #[test]
-    fn settings_window_does_not_disable_the_recording_hotkey() {
-        assert!(should_toggle_recording(true, true, false));
+    fn settings_window_blocks_the_recording_hotkey() {
+        assert!(!should_toggle_recording(true, true, true, false));
     }
 
     #[test]
-    fn shortcut_capture_temporarily_consumes_hotkey_input() {
-        assert!(!should_toggle_recording(true, true, true));
+    fn recording_hotkey_works_when_settings_are_closed() {
+        assert!(should_toggle_recording(true, true, false, false));
+    }
+
+    #[test]
+    fn shortcut_capture_consumes_hotkey_input() {
+        assert!(!should_toggle_recording(true, true, true, true));
     }
 }

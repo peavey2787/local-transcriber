@@ -1,4 +1,4 @@
-//! Thread-safe root-viewport wake handle for events outside the egui loop.
+//! Thread-safe wake handle for events arriving outside the egui update loop.
 
 use eframe::egui;
 use parking_lot::Mutex;
@@ -11,15 +11,12 @@ pub(crate) struct UiWake {
 
 impl UiWake {
     pub(crate) fn install(&self, context: &egui::Context) {
-        let mut installed = self.context.lock();
-        if installed.is_none() {
-            *installed = Some(context.clone());
-        }
+        *self.context.lock() = Some(context.clone());
     }
 
-    pub(crate) fn request_root_repaint(&self) {
+    pub(crate) fn request_repaint(&self) {
         if let Some(context) = self.context.lock().as_ref() {
-            context.request_repaint_of(egui::ViewportId::ROOT);
+            context.request_repaint();
         }
     }
 }
@@ -30,11 +27,11 @@ mod tests {
 
     #[test]
     fn wake_can_be_requested_before_egui_is_installed() {
-        UiWake::default().request_root_repaint();
+        UiWake::default().request_repaint();
     }
 
     #[test]
-    fn external_events_target_the_persistent_root() {
+    fn external_events_wake_the_root_context() {
         let context = egui::Context::default();
         let requested_viewports = Arc::new(Mutex::new(Vec::new()));
         let captured_viewports = requested_viewports.clone();
@@ -44,7 +41,7 @@ mod tests {
 
         let wake = UiWake::default();
         wake.install(&context);
-        wake.request_root_repaint();
+        wake.request_repaint();
 
         assert_eq!(
             requested_viewports.lock().last(),

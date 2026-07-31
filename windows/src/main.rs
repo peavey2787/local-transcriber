@@ -9,6 +9,7 @@ mod asr;
 mod audio;
 mod config;
 mod hotkey;
+mod icon;
 mod model;
 mod overlay;
 mod platform;
@@ -58,6 +59,11 @@ fn run() -> Result<()> {
     // and global shortcut remain active.
     let viewport = egui::ViewportBuilder::default()
         .with_title("local-stt")
+        .with_icon(egui::IconData {
+            rgba: icon::mic_icon_rgba(icon::APP_ICON_SIZE),
+            width: icon::APP_ICON_SIZE,
+            height: icon::APP_ICON_SIZE,
+        })
         .with_inner_size([CARD_W, CARD_H])
         .with_position([-32000.0, -32000.0])
         .with_decorations(false)

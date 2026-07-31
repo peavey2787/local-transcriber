@@ -14,6 +14,7 @@ use crate::overlay::{Overlay, OverlayAction, OverlayState};
 use crate::platform::PasteTarget;
 use crate::tray::{Tray, TrayAction};
 
+use super::lifecycle::WindowLifecycle;
 use super::recording::LiveSession;
 use super::settings::SettingsState;
 use super::theme;
@@ -37,6 +38,7 @@ pub struct LocalSttApp {
     pub(super) paste_target: Option<PasteTarget>,
     pub(super) settings: SettingsState,
     pub(super) hotkey_problem: Option<String>,
+    pub(super) lifecycle: WindowLifecycle,
 }
 
 impl LocalSttApp {
@@ -101,6 +103,7 @@ impl LocalSttApp {
             startup_status,
             paste_target: None,
             hotkey_problem,
+            lifecycle: WindowLifecycle::default(),
         })
     }
 
@@ -125,10 +128,29 @@ impl LocalSttApp {
         match self.tray.poll_action() {
             Some(TrayAction::Settings) => self.open_settings(),
             Some(TrayAction::Quit) => {
+                self.lifecycle.request_exit();
                 ctx.send_viewport_cmd(ViewportCommand::Close);
                 return true;
             }
             None => {}
+        }
+        false
+    }
+
+    fn handle_window_close(&mut self, ctx: &egui::Context) -> bool {
+        let close_requested = ctx.input(|input| input.viewport().close_requested());
+        if !close_requested {
+            return false;
+        }
+        if !self.lifecycle.should_cancel_close(close_requested) {
+            return true;
+        }
+
+        ctx.send_viewport_cmd(ViewportCommand::CancelClose);
+        if self.settings.open {
+            self.close_settings();
+        } else {
+            self.overlay.dismiss();
         }
         false
     }
@@ -185,6 +207,9 @@ impl eframe::App for LocalSttApp {
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.install_ui_wake(ctx);
+        if self.handle_window_close(ctx) {
+            return;
+        }
 
         let dt = self.last_frame.elapsed().as_secs_f32().min(0.05);
         self.last_frame = Instant::now();

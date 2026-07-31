@@ -202,7 +202,7 @@ impl LocalSttApp {
         }
     }
 
-    pub(super) fn close_settings(&mut self) {
+    pub(in crate::app) fn close_settings(&mut self) {
         self.settings.open = false;
         self.settings.focus_pending = false;
         self.settings.capturing_hotkey = false;

@@ -2,6 +2,7 @@
 name = "local-stt-rs"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
 description = "Windows background speech-to-text tray app powered by NVIDIA Parakeet TDT"
 license = "MIT"
 
@@ -16,7 +17,6 @@ eframe = { version = "0.31", default-features = true, features = ["default_fonts
 egui = "0.31"
 env_logger = "0.11"
 global-hotkey = "0.8"
-image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 muda = "0.15"
 parking_lot = "0.12"
@@ -36,6 +36,14 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[build-dependencies]
+winresource = "0.1.31"
+
+[package.metadata.winresource]
+FileDescription = "Local speech-to-text powered by NVIDIA Parakeet TDT"
+OriginalFilename = "local-stt.exe"
+ProductName = "local-stt"
 
 [profile.release]
 lto = true

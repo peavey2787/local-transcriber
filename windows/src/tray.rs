@@ -5,7 +5,7 @@ use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::hotkey::friendly_name;
-use crate::util::make_mic_icon;
+use crate::icon::{mic_icon_rgba, APP_ICON_SIZE};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
@@ -30,9 +30,8 @@ fn hotkey_menu_text(hotkey: &str) -> String {
 
 impl Tray {
     pub fn new(hotkey: &str) -> Result<Self> {
-        let rgba = make_mic_icon(64, [0x1B, 0xB9, 0xCE]);
-        let (w, h) = (rgba.width(), rgba.height());
-        let icon = Icon::from_rgba(rgba.into_raw(), w, h).context("tray icon from rgba")?;
+        let icon = Icon::from_rgba(mic_icon_rgba(APP_ICON_SIZE), APP_ICON_SIZE, APP_ICON_SIZE)
+            .context("tray icon from rgba")?;
 
         let settings = MenuItem::new("Settings…", true, None);
         let settings_id = settings.id().clone();

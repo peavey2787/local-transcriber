@@ -1,6 +1,4 @@
-//! Shared helpers: silence trim, resampling, mic icon.
-
-use image::{ImageBuffer, Rgba, RgbaImage};
+//! Shared audio-processing helpers.
 
 pub const SAMPLE_RATE: u32 = 16_000;
 
@@ -74,87 +72,4 @@ pub fn cpu_threads() -> i32 {
         .map(|n| n.get())
         .unwrap_or(4);
     (n.saturating_sub(2)).max(2) as i32
-}
-
-/// Draw a simple mic tray icon (RGBA).
-pub fn make_mic_icon(size: u32, color: [u8; 3]) -> RgbaImage {
-    let mut img: RgbaImage = ImageBuffer::from_pixel(size, size, Rgba([0, 0, 0, 0]));
-    let c = Rgba([color[0], color[1], color[2], 255]);
-    let s = size as f32;
-
-    // Mic body (rounded-ish rect)
-    fill_ellipse(
-        &mut img,
-        (s * 0.50) as i32,
-        (s * 0.30) as i32,
-        (s * 0.18) as i32,
-        (s * 0.26) as i32,
-        c,
-    );
-    // Stem
-    fill_rect(
-        &mut img,
-        (s * 0.46) as i32,
-        (s * 0.54) as i32,
-        (s * 0.08) as i32,
-        (s * 0.22) as i32,
-        c,
-    );
-    // Base
-    fill_rect(
-        &mut img,
-        (s * 0.30) as i32,
-        (s * 0.84) as i32,
-        (s * 0.40) as i32,
-        (s * 0.08) as i32,
-        c,
-    );
-    // Arc stand (approx with thick points)
-    let cx = (s * 0.50) as i32;
-    let cy = (s * 0.52) as i32;
-    let r = (s * 0.28) as i32;
-    for deg in 10..170 {
-        let rad = (deg as f32).to_radians();
-        let x = cx + (r as f32 * rad.cos()) as i32;
-        let y = cy + (r as f32 * rad.sin()) as i32;
-        put_thick(&mut img, x, y, 2, c);
-    }
-    img
-}
-
-fn fill_rect(img: &mut RgbaImage, x: i32, y: i32, w: i32, h: i32, c: Rgba<u8>) {
-    let (iw, ih) = (img.width() as i32, img.height() as i32);
-    for yy in y..(y + h) {
-        for xx in x..(x + w) {
-            if xx >= 0 && yy >= 0 && xx < iw && yy < ih {
-                img.put_pixel(xx as u32, yy as u32, c);
-            }
-        }
-    }
-}
-
-fn fill_ellipse(img: &mut RgbaImage, cx: i32, cy: i32, rx: i32, ry: i32, c: Rgba<u8>) {
-    let (iw, ih) = (img.width() as i32, img.height() as i32);
-    for yy in (cy - ry)..(cy + ry + 1) {
-        for xx in (cx - rx)..(cx + rx + 1) {
-            let dx = (xx - cx) as f32 / rx as f32;
-            let dy = (yy - cy) as f32 / ry as f32;
-            if dx * dx + dy * dy <= 1.0 && xx >= 0 && yy >= 0 && xx < iw && yy < ih {
-                img.put_pixel(xx as u32, yy as u32, c);
-            }
-        }
-    }
-}
-
-fn put_thick(img: &mut RgbaImage, x: i32, y: i32, r: i32, c: Rgba<u8>) {
-    let (iw, ih) = (img.width() as i32, img.height() as i32);
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let xx = x + dx;
-            let yy = y + dy;
-            if xx >= 0 && yy >= 0 && xx < iw && yy < ih {
-                img.put_pixel(xx as u32, yy as u32, c);
-            }
-        }
-    }
 }

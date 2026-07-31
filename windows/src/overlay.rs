@@ -4,7 +4,7 @@ use egui::{self, Color32, CornerRadius, Frame, RichText, Sense, Stroke, Vec2};
 
 pub const CARD_W: f32 = 760.0;
 pub const CARD_H: f32 = 112.0;
-pub const CARD_H_RESULT: f32 = 340.0;
+pub const CARD_H_RESULT: f32 = 380.0;
 
 const BG: Color32 = Color32::from_rgb(0x0E, 0x0F, 0x0F);
 const BORDER: Color32 = Color32::from_rgb(0x2A, 0x2A, 0x2A);
@@ -343,5 +343,13 @@ mod tests {
         overlay.show_persistent_notice("Choose another shortcut", false);
         overlay.tick(10_000.0, 0.016);
         assert!(matches!(overlay.state, OverlayState::Notice { .. }));
+    }
+
+    #[test]
+    fn result_reserves_room_for_the_editor_and_action_row() {
+        let mut overlay = Overlay::default();
+        overlay.show_result("hello".into(), true, "Copied to clipboard", 10.0, 3.0);
+        assert_eq!(overlay.desired_height(), CARD_H_RESULT);
+        assert!(overlay.desired_height() >= 380.0);
     }
 }

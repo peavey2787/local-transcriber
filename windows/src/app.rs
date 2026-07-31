@@ -4,6 +4,7 @@
 //! settings, overlay presentation, tray integration, and viewport placement.
 
 mod controller;
+mod lifecycle;
 mod recording;
 mod result;
 mod settings;

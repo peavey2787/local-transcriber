@@ -131,7 +131,7 @@ impl LocalSttApp {
         if should_toggle_recording(
             self.hotkeys.is_bound(),
             hotkey_pressed,
-            self.settings.capturing_hotkey,
+            self.settings.is_capturing_hotkey(),
         ) {
             self.toggle_record();
         }

@@ -76,6 +76,10 @@ impl SettingsState {
         self.message = None;
     }
 
+    pub(in crate::app) fn is_capturing_hotkey(&self) -> bool {
+        self.capturing_hotkey
+    }
+
     pub(super) fn refresh_input_devices(&mut self) -> Result<usize> {
         self.input_devices = input_device_options()?;
         Ok(self.input_devices.len().saturating_sub(1))

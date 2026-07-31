@@ -25,7 +25,6 @@ pub struct LocalSttApp {
     pub(super) tray: Tray,
     pub(super) hotkeys: Hotkeys,
     pub(super) ui_wake: UiWake,
-    pub(super) app_icon: Arc<egui::IconData>,
     pub(super) recorder: Recorder,
     pub(super) engine: Option<Arc<AsrEngine>>,
     pub(super) recording: bool,
@@ -48,11 +47,10 @@ impl LocalSttApp {
         theme::configure(&cc.egui_ctx);
 
         let ui_wake = UiWake::default();
-        let app_icon = Arc::new(egui::IconData {
-            rgba: crate::icon::mic_icon_rgba(crate::icon::APP_ICON_SIZE),
-            width: crate::icon::APP_ICON_SIZE,
-            height: crate::icon::APP_ICON_SIZE,
-        });
+        // Install the repaint target before tray and hotkey callbacks are registered.
+        // External Windows events can then wake the persistent root immediately,
+        // including during startup and after Settings has been closed.
+        ui_wake.install(&cc.egui_ctx);
         let requested_hotkey = config.hotkey.clone();
         let (hotkeys, registration_warning) =
             Hotkeys::register(ui_wake.clone(), &requested_hotkey)?;
@@ -98,7 +96,6 @@ impl LocalSttApp {
             tray,
             hotkeys,
             ui_wake,
-            app_icon,
             recorder,
             engine: None,
             recording: false,
@@ -157,8 +154,16 @@ impl LocalSttApp {
             return true;
         }
 
+        // The root viewport owns the process lifetime. Its native close button is
+        // used only while Settings is being presented, so close means "hide
+        // Settings" rather than "destroy the application".
         ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-        self.overlay.dismiss();
+        if self.settings_window.is_visible() {
+            self.close_settings();
+            ctx.request_repaint();
+        } else {
+            self.overlay.dismiss();
+        }
         false
     }
 
@@ -179,9 +184,10 @@ impl LocalSttApp {
     }
 
     fn render(&mut self, ctx: &egui::Context) {
-        // The Settings viewport is independent of the persistent root.
-        // It exists only while requested and can be reopened with the same ID.
-        self.render_settings(ctx);
+        if self.settings_window.is_visible() {
+            self.render_settings(ctx);
+            return;
+        }
 
         if matches!(&self.overlay.state, OverlayState::Hidden) && self.overlay.alpha < 0.01 {
             egui::CentralPanel::default()

@@ -1,4 +1,4 @@
-//! Visibility and focus state for the independent Settings viewport.
+//! Visibility and focus state for presenting Settings in the persistent root window.
 
 #[derive(Debug, Default)]
 pub(in crate::app) struct SettingsWindowState {
@@ -7,7 +7,7 @@ pub(in crate::app) struct SettingsWindowState {
 }
 
 impl SettingsWindowState {
-    /// Present the Settings viewport and request focus.
+    /// Present Settings in the persistent root window and request focus.
     ///
     /// Returns `true` only when the viewport transitions from hidden to shown.
     pub(in crate::app) fn show(&mut self) -> bool {
@@ -17,7 +17,7 @@ impl SettingsWindowState {
         became_visible
     }
 
-    /// Stop presenting the Settings viewport without affecting the root app.
+    /// Return the persistent root window to background/notification mode.
     pub(in crate::app) fn hide(&mut self) {
         self.visible = false;
         self.focus_requested = false;
@@ -37,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_viewport_can_be_shown_hidden_and_shown_again() {
+    fn settings_can_be_shown_hidden_and_shown_again_in_the_root_window() {
         let mut state = SettingsWindowState::default();
 
         assert!(!state.is_visible());
@@ -55,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_show_requests_focus_without_reinitializing_form_state() {
+    fn repeated_settings_command_requests_focus_without_reinitializing_form_state() {
         let mut state = SettingsWindowState::default();
 
         assert!(state.show());

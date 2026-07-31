@@ -2,24 +2,47 @@
 
 use eframe::egui::{self, Color32, RichText};
 
-mod window;
-
 use super::super::controller::LocalSttApp;
 use super::state::SettingsChanges;
 use crate::config::{MAX_NOTIFICATION_SECONDS, MIN_NOTIFICATION_SECONDS};
 use crate::hotkey::{capture_shortcut, friendly_name, CaptureOutcome};
+use crate::overlay::OverlayAction;
 
 fn help_text(text: impl Into<String>) -> RichText {
     RichText::new(text).size(13.0).weak()
 }
 
 impl LocalSttApp {
+    pub(in crate::app) fn render_settings(&mut self, ctx: &egui::Context) {
+        let mut overlay_action = None;
+        if self.overlay.is_visible() {
+            egui::TopBottomPanel::top("settings-notification")
+                .resizable(false)
+                .exact_height(self.overlay.desired_height() + 20.0)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(Color32::from_rgb(14, 15, 15))
+                        .inner_margin(10.0),
+                )
+                .show(ctx, |ui| {
+                    ui.multiply_opacity(self.overlay.alpha);
+                    overlay_action = self.overlay.ui(ctx, ui);
+                });
+        }
+
+        self.draw_settings(ctx);
+        if let Some(OverlayAction::CopyDone(text)) = overlay_action {
+            self.copy_edited_result(text);
+        }
+    }
+
     fn draw_settings(&mut self, ctx: &egui::Context) {
         let captured_this_frame = self.poll_shortcut_capture(ctx);
         let mut changes = SettingsChanges {
             hotkey: captured_this_frame,
             ..SettingsChanges::default()
         };
+        let mut close_requested = false;
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::NONE
@@ -27,7 +50,7 @@ impl LocalSttApp {
                     .inner_margin(24.0),
             )
             .show(ctx, |ui| {
-                self.draw_settings_header(ui);
+                close_requested = self.draw_settings_header(ui);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -46,8 +69,9 @@ impl LocalSttApp {
         let escape_closes = !self.settings.capturing_hotkey
             && !captured_this_frame
             && ctx.input(|input| input.key_pressed(egui::Key::Escape));
-        if escape_closes {
+        if close_requested || escape_closes {
             self.close_settings();
+            ctx.request_repaint();
         }
     }
 
@@ -82,12 +106,21 @@ impl LocalSttApp {
         false
     }
 
-    fn draw_settings_header(&self, ui: &mut egui::Ui) {
-        ui.vertical(|ui| {
-            ui.heading("local-stt settings");
-            ui.label(help_text("Changes save automatically."));
-        });
+    fn draw_settings_header(&self, ui: &mut egui::Ui) -> bool {
+        let close_requested = ui
+            .horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.heading("local-stt settings");
+                    ui.label(help_text("Changes save automatically."));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.button("Close").clicked()
+                })
+                .inner
+            })
+            .inner;
         ui.add_space(14.0);
+        close_requested
     }
 
     fn draw_recording_device_section(&mut self, ui: &mut egui::Ui) -> (bool, bool) {

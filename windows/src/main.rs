@@ -54,9 +54,9 @@ fn run() -> Result<()> {
         cfg.auto_paste
     );
 
-    // Keep one native root window alive for idle control and notifications.
-    // Settings uses an independent native viewport, so neither window owns the
-    // tray, hotkey, worker, or process lifecycle.
+    // Keep one native root window alive for the entire process lifetime.
+    // The same window presents idle control, notifications, and Settings, so
+    // opening or closing Settings never creates or destroys an event loop.
     let viewport = egui::ViewportBuilder::default()
         .with_title("local-stt")
         .with_icon(egui::IconData {

@@ -2,6 +2,8 @@
 
 use eframe::egui::{self, Color32, RichText};
 
+mod window;
+
 use super::super::controller::LocalSttApp;
 use super::state::SettingsChanges;
 use crate::config::{MAX_NOTIFICATION_SECONDS, MIN_NOTIFICATION_SECONDS};
@@ -12,10 +14,6 @@ fn help_text(text: impl Into<String>) -> RichText {
 }
 
 impl LocalSttApp {
-    pub(in crate::app) fn render_settings(&mut self, ctx: &egui::Context) {
-        self.draw_settings(ctx);
-    }
-
     fn draw_settings(&mut self, ctx: &egui::Context) {
         let captured_this_frame = self.poll_shortcut_capture(ctx);
         let mut changes = SettingsChanges {

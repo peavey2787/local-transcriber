@@ -88,10 +88,44 @@ impl Tray {
     }
 
     pub fn poll_action(&self) -> Option<TrayAction> {
-        let mut action = None;
-        while let Ok(next) = self.actions.try_recv() {
-            action = Some(next);
+        coalesce_actions(self.actions.try_iter())
+    }
+}
+
+fn coalesce_actions(actions: impl IntoIterator<Item = TrayAction>) -> Option<TrayAction> {
+    let mut settings_requested = false;
+    let mut quit_requested = false;
+    for action in actions {
+        match action {
+            TrayAction::Quit => quit_requested = true,
+            TrayAction::Settings => settings_requested = true,
         }
-        action
+    }
+    if quit_requested {
+        Some(TrayAction::Quit)
+    } else {
+        settings_requested.then_some(TrayAction::Settings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quit_has_priority_over_any_queued_settings_commands() {
+        assert_eq!(
+            coalesce_actions([TrayAction::Settings, TrayAction::Quit, TrayAction::Settings]),
+            Some(TrayAction::Quit)
+        );
+    }
+
+    #[test]
+    fn repeated_settings_commands_are_coalesced() {
+        assert_eq!(
+            coalesce_actions([TrayAction::Settings, TrayAction::Settings]),
+            Some(TrayAction::Settings)
+        );
+        assert_eq!(coalesce_actions([]), None);
     }
 }

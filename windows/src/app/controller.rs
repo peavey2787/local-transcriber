@@ -25,6 +25,7 @@ pub struct LocalSttApp {
     pub(super) tray: Tray,
     pub(super) hotkeys: Hotkeys,
     pub(super) ui_wake: UiWake,
+    pub(super) app_icon: Arc<egui::IconData>,
     pub(super) recorder: Recorder,
     pub(super) engine: Option<Arc<AsrEngine>>,
     pub(super) recording: bool,
@@ -45,6 +46,11 @@ impl LocalSttApp {
         theme::configure(&cc.egui_ctx);
 
         let ui_wake = UiWake::default();
+        let app_icon = Arc::new(egui::IconData {
+            rgba: crate::icon::mic_icon_rgba(crate::icon::APP_ICON_SIZE),
+            width: crate::icon::APP_ICON_SIZE,
+            height: crate::icon::APP_ICON_SIZE,
+        });
         let requested_hotkey = config.hotkey.clone();
         let (hotkeys, registration_warning) =
             Hotkeys::register(ui_wake.clone(), &requested_hotkey)?;
@@ -89,6 +95,7 @@ impl LocalSttApp {
             tray,
             hotkeys,
             ui_wake,
+            app_icon,
             recorder,
             engine: None,
             recording: false,
@@ -173,6 +180,9 @@ impl LocalSttApp {
     fn render(&mut self, ctx: &egui::Context) {
         if self.settings.open {
             self.render_settings(ctx);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(Color32::TRANSPARENT))
+                .show(ctx, |_ui| {});
             return;
         }
         if matches!(&self.overlay.state, OverlayState::Hidden) && self.overlay.alpha < 0.01 {

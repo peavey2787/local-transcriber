@@ -15,6 +15,7 @@ mod overlay;
 mod platform;
 mod sha256;
 mod tray;
+mod ui_wake;
 mod util;
 
 use anyhow::Result;

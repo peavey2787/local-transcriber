@@ -2,17 +2,17 @@
 
 use anyhow::Result;
 use eframe::egui::{self, Color32, ViewportCommand};
-use parking_lot::Mutex;
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::asr::AsrEngine;
 use crate::audio::Recorder;
 use crate::config::{self, Config};
-use crate::hotkey::{Hotkeys, UiWake};
+use crate::hotkey::Hotkeys;
 use crate::overlay::{Overlay, OverlayAction, OverlayState};
 use crate::platform::PasteTarget;
 use crate::tray::{Tray, TrayAction};
+use crate::ui_wake::UiWake;
 
 use super::lifecycle::WindowLifecycle;
 use super::recording::LiveSession;
@@ -25,6 +25,7 @@ pub struct LocalSttApp {
     pub(super) tray: Tray,
     pub(super) hotkeys: Hotkeys,
     pub(super) ui_wake: UiWake,
+    pub(super) app_icon: Arc<egui::IconData>,
     pub(super) recorder: Recorder,
     pub(super) engine: Option<Arc<AsrEngine>>,
     pub(super) recording: bool,
@@ -32,7 +33,6 @@ pub struct LocalSttApp {
     pub(super) transcription: TranscriptionWorker,
     pub(super) started: Instant,
     pub(super) last_frame: Instant,
-    pub(super) wake_installed: bool,
     pub(super) config: Config,
     pub(super) startup_status: String,
     pub(super) paste_target: Option<PasteTarget>,
@@ -45,7 +45,12 @@ impl LocalSttApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>, mut config: Config) -> Result<Self> {
         theme::configure(&cc.egui_ctx);
 
-        let ui_wake: UiWake = Arc::new(Mutex::new(None));
+        let ui_wake = UiWake::default();
+        let app_icon = Arc::new(egui::IconData {
+            rgba: crate::icon::mic_icon_rgba(crate::icon::APP_ICON_SIZE),
+            width: crate::icon::APP_ICON_SIZE,
+            height: crate::icon::APP_ICON_SIZE,
+        });
         let requested_hotkey = config.hotkey.clone();
         let (hotkeys, registration_warning) =
             Hotkeys::register(ui_wake.clone(), &requested_hotkey)?;
@@ -60,7 +65,7 @@ impl LocalSttApp {
                 eprintln!("[local-stt] could not save the disabled hotkey state: {error:#}");
             }
         }
-        let tray = Tray::new(&config.hotkey)?;
+        let tray = Tray::new(&config.hotkey, ui_wake.clone())?;
         let recorder = match Recorder::new(config.recording_device.as_ref()) {
             Ok(recorder) => recorder,
             Err(error) if config.recording_device.is_some() => {
@@ -90,6 +95,7 @@ impl LocalSttApp {
             tray,
             hotkeys,
             ui_wake,
+            app_icon,
             recorder,
             engine: None,
             recording: false,
@@ -97,7 +103,6 @@ impl LocalSttApp {
             transcription,
             started: Instant::now(),
             last_frame: Instant::now(),
-            wake_installed: false,
             settings: SettingsState::from_config(&config),
             config,
             startup_status,
@@ -113,21 +118,18 @@ impl LocalSttApp {
 }
 
 impl LocalSttApp {
-    fn install_ui_wake(&mut self, ctx: &egui::Context) {
-        if !self.wake_installed {
-            *self.ui_wake.lock() = Some(ctx.clone());
-            self.wake_installed = true;
-        }
-    }
-
     fn handle_user_commands(&mut self, ctx: &egui::Context) -> bool {
         let hotkey_pressed = self.hotkeys.poll_toggle();
         if self.hotkeys.is_bound() && hotkey_pressed && !self.settings.open {
             self.toggle_record();
         }
         match self.tray.poll_action() {
-            Some(TrayAction::Settings) => self.open_settings(),
+            Some(TrayAction::Settings) => {
+                log::debug!("handling tray Settings command");
+                self.open_settings();
+            }
             Some(TrayAction::Quit) => {
+                log::debug!("handling tray Quit command");
                 self.lifecycle.request_exit();
                 ctx.send_viewport_cmd(ViewportCommand::Close);
                 return true;
@@ -177,7 +179,10 @@ impl LocalSttApp {
 
     fn render(&mut self, ctx: &egui::Context) {
         if self.settings.open {
-            self.draw_settings(ctx);
+            self.render_settings_viewport(ctx);
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(Color32::TRANSPARENT))
+                .show(ctx, |_ui| {});
             return;
         }
         if matches!(&self.overlay.state, OverlayState::Hidden) && self.overlay.alpha < 0.01 {
@@ -206,7 +211,7 @@ impl eframe::App for LocalSttApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.install_ui_wake(ctx);
+        self.ui_wake.install(ctx);
         if self.handle_window_close(ctx) {
             return;
         }
@@ -220,7 +225,7 @@ impl eframe::App for LocalSttApp {
         }
 
         self.advance_frame_state(dt);
-        self.sync_viewport(ctx);
+        self.sync_root_viewport(ctx);
         self.request_next_frame(ctx);
         self.render(ctx);
     }

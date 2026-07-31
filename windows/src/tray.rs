@@ -1,11 +1,13 @@
 //! System tray icon + menu.
 
 use anyhow::{Context, Result};
+use crossbeam_channel::{unbounded, Receiver};
 use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::hotkey::friendly_name;
 use crate::icon::{mic_icon_rgba, APP_ICON_SIZE};
+use crate::ui_wake::UiWake;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
@@ -16,8 +18,7 @@ pub enum TrayAction {
 pub struct Tray {
     icon: TrayIcon,
     hotkey_item: MenuItem,
-    settings_id: muda::MenuId,
-    quit_id: muda::MenuId,
+    actions: Receiver<TrayAction>,
 }
 
 fn hotkey_menu_text(hotkey: &str) -> String {
@@ -29,7 +30,7 @@ fn hotkey_menu_text(hotkey: &str) -> String {
 }
 
 impl Tray {
-    pub fn new(hotkey: &str) -> Result<Self> {
+    pub fn new(hotkey: &str, ui_wake: UiWake) -> Result<Self> {
         let icon = Icon::from_rgba(mic_icon_rgba(APP_ICON_SIZE), APP_ICON_SIZE, APP_ICON_SIZE)
             .context("tray icon from rgba")?;
 
@@ -47,6 +48,23 @@ impl Tray {
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
 
+        let (action_tx, actions) = unbounded();
+        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+            let action = if event.id == settings_id {
+                Some(TrayAction::Settings)
+            } else if event.id == quit_id {
+                Some(TrayAction::Quit)
+            } else {
+                None
+            };
+            if let Some(action) = action {
+                if action_tx.send(action).is_ok() {
+                    log::debug!("tray command queued: {action:?}");
+                    ui_wake.request_repaint();
+                }
+            }
+        }));
+
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("local-stt — loading model…")
@@ -57,8 +75,7 @@ impl Tray {
         Ok(Self {
             icon: tray,
             hotkey_item,
-            settings_id,
-            quit_id,
+            actions,
         })
     }
 
@@ -72,12 +89,8 @@ impl Tray {
 
     pub fn poll_action(&self) -> Option<TrayAction> {
         let mut action = None;
-        while let Ok(event) = MenuEvent::receiver().try_recv() {
-            if event.id == self.settings_id {
-                action = Some(TrayAction::Settings);
-            } else if event.id == self.quit_id {
-                action = Some(TrayAction::Quit);
-            }
+        while let Ok(next) = self.actions.try_recv() {
+            action = Some(next);
         }
         action
     }

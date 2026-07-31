@@ -2,25 +2,59 @@
 
 use eframe::egui::{self, Color32, RichText};
 
+use super::super::controller::LocalSttApp;
+use super::state::SettingsChanges;
 use crate::config::{MAX_NOTIFICATION_SECONDS, MIN_NOTIFICATION_SECONDS};
 use crate::hotkey::{capture_shortcut, friendly_name, CaptureOutcome};
 
-use super::super::controller::LocalSttApp;
-use super::state::SettingsChanges;
+const SETTINGS_VIEWPORT_ID: &str = "local-stt-settings";
+const SETTINGS_W: f32 = 720.0;
+const SETTINGS_H: f32 = 780.0;
 
 fn help_text(text: impl Into<String>) -> RichText {
     RichText::new(text).size(13.0).weak()
 }
 
 impl LocalSttApp {
-    pub(in crate::app) fn draw_settings(&mut self, ctx: &egui::Context) {
+    pub(in crate::app) fn render_settings_viewport(&mut self, root_ctx: &egui::Context) {
+        let monitor = root_ctx
+            .input(|input| input.viewport().monitor_size)
+            .unwrap_or(egui::vec2(1920.0, 1080.0));
+        let (position, size) = settings_viewport_geometry(monitor);
+        let builder = egui::ViewportBuilder::default()
+            .with_title("local-stt settings")
+            .with_icon(self.app_icon.clone())
+            .with_position(position)
+            .with_inner_size(size)
+            .with_resizable(false)
+            .with_taskbar(true)
+            .with_close_button(true)
+            .with_active(true)
+            .with_always_on_top();
+
+        let native_close_requested = root_ctx.show_viewport_immediate(
+            egui::ViewportId::from_hash_of(SETTINGS_VIEWPORT_ID),
+            builder,
+            |settings_ctx, _class| {
+                if self.settings.focus_pending {
+                    settings_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    self.settings.focus_pending = false;
+                }
+                self.draw_settings(settings_ctx);
+                settings_ctx.input(|input| input.viewport().close_requested())
+            },
+        );
+        if native_close_requested && self.settings.open {
+            self.close_settings();
+        }
+    }
+
+    fn draw_settings(&mut self, ctx: &egui::Context) {
         let captured_this_frame = self.poll_shortcut_capture(ctx);
         let mut changes = SettingsChanges {
             hotkey: captured_this_frame,
             ..SettingsChanges::default()
         };
-        let mut close = false;
-
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::NONE
@@ -28,7 +62,7 @@ impl LocalSttApp {
                     .inner_margin(24.0),
             )
             .show(ctx, |ui| {
-                self.draw_settings_header(ui, &mut close);
+                self.draw_settings_header(ui);
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
@@ -47,7 +81,7 @@ impl LocalSttApp {
         let escape_closes = !self.settings.capturing_hotkey
             && !captured_this_frame
             && ctx.input(|input| input.key_pressed(egui::Key::Escape));
-        if close || escape_closes {
+        if escape_closes {
             self.close_settings();
         }
     }
@@ -83,17 +117,10 @@ impl LocalSttApp {
         false
     }
 
-    fn draw_settings_header(&self, ui: &mut egui::Ui, close: &mut bool) {
-        ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.heading("local-stt settings");
-                ui.label(help_text("Changes save automatically."));
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("✕").clicked() {
-                    *close = true;
-                }
-            });
+    fn draw_settings_header(&self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.heading("local-stt settings");
+            ui.label(help_text("Changes save automatically."));
         });
         ui.add_space(14.0);
     }
@@ -266,5 +293,30 @@ impl LocalSttApp {
                 Color32::from_rgb(215, 93, 93)
             }));
         }
+    }
+}
+
+fn settings_viewport_geometry(monitor: egui::Vec2) -> (egui::Pos2, egui::Vec2) {
+    let width = SETTINGS_W.min((monitor.x - 24.0).max(360.0));
+    let height = SETTINGS_H.min((monitor.y - 40.0).max(420.0));
+    let x = ((monitor.x - width) * 0.5).max(0.0);
+    let y = ((monitor.y - height) * 0.35).max(20.0);
+    (egui::pos2(x, y), egui::vec2(width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_window_is_centered_and_bounded_to_the_monitor() {
+        let (position, size) = settings_viewport_geometry(egui::vec2(1920.0, 1080.0));
+        assert_eq!(size, egui::vec2(SETTINGS_W, SETTINGS_H));
+        assert_eq!(position.x, 600.0);
+        assert!(position.y >= 20.0);
+
+        let (_, compact_size) = settings_viewport_geometry(egui::vec2(640.0, 480.0));
+        assert!(compact_size.x <= 616.0);
+        assert!(compact_size.y <= 440.0);
     }
 }

@@ -2,15 +2,12 @@
 
 use anyhow::{Context as AnyhowContext, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use eframe::egui::{Context as EguiContext, Event as EguiEvent};
+use eframe::egui::Event as EguiEvent;
 use global_hotkey::hotkey::HotKey;
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
-use parking_lot::Mutex;
-use std::sync::Arc;
 use std::sync::OnceLock;
 
-/// Shared handle so hotkey events can wake the egui event loop.
-pub type UiWake = Arc<Mutex<Option<EguiContext>>>;
+use crate::ui_wake::UiWake;
 
 static HOTKEY_TX: OnceLock<Sender<()>> = OnceLock::new();
 static UI_WAKE: OnceLock<UiWake> = OnceLock::new();
@@ -38,9 +35,7 @@ impl Hotkeys {
                 let _ = tx.send(());
             }
             if let Some(wake) = UI_WAKE.get() {
-                if let Some(ctx) = wake.lock().as_ref() {
-                    ctx.request_repaint();
-                }
+                wake.request_repaint();
             }
         }));
 

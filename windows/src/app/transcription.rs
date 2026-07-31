@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::thread;
 
 use crate::asr::AsrEngine;
-use crate::hotkey::UiWake;
+use crate::ui_wake::UiWake;
 
 const MAX_QUEUED_CHUNKS: usize = 8;
 
@@ -77,18 +77,18 @@ fn run_worker(jobs: Receiver<ChunkJob>, events: Sender<TranscriptionEvent>, ui_w
     let status_wake = ui_wake.clone();
     let engine = AsrEngine::load_with_status(move |message| {
         let _ = status_events.send(TranscriptionEvent::EngineStatus(message));
-        request_repaint(&status_wake);
+        status_wake.request_repaint();
     });
 
     let engine = match engine {
         Ok(engine) => {
             let _ = events.send(TranscriptionEvent::EngineReady(Ok(engine.clone())));
-            request_repaint(&ui_wake);
+            ui_wake.request_repaint();
             engine
         }
         Err(error) => {
             let _ = events.send(TranscriptionEvent::EngineReady(Err(format!("{error:#}"))));
-            request_repaint(&ui_wake);
+            ui_wake.request_repaint();
             return;
         }
     };
@@ -99,12 +99,6 @@ fn run_worker(jobs: Receiver<ChunkJob>, events: Sender<TranscriptionEvent>, ui_w
             .transcribe_labeled(&job.audio, Some(&label))
             .map_err(|error| format!("{error:#}"));
         let _ = events.send(TranscriptionEvent::ChunkDone { id: job.id, result });
-        request_repaint(&ui_wake);
-    }
-}
-
-fn request_repaint(wake: &UiWake) {
-    if let Some(ctx) = wake.lock().as_ref() {
-        ctx.request_repaint();
+        ui_wake.request_repaint();
     }
 }

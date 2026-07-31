@@ -97,28 +97,36 @@ impl LocalSttApp {
 
         let before = self.settings.recording_device.clone();
         let options = self.settings.input_devices.clone();
+        let recording_active = self.recording_pipeline_busy();
         let refresh_requested = ui
             .horizontal(|ui| {
                 let button_width = 138.0;
                 let combo_width =
                     (ui.available_width() - button_width - ui.spacing().item_spacing.x).max(160.0);
-                egui::ComboBox::from_id_salt("recording-device")
-                    .selected_text(self.settings.selected_device_label())
-                    .width(combo_width)
-                    .show_ui(ui, |ui| {
-                        for option in options {
-                            ui.selectable_value(
-                                &mut self.settings.recording_device,
-                                option.selection,
-                                option.label,
-                            );
-                        }
-                    });
+                ui.add_enabled_ui(!recording_active, |ui| {
+                    egui::ComboBox::from_id_salt("recording-device")
+                        .selected_text(self.settings.selected_device_label())
+                        .width(combo_width)
+                        .show_ui(ui, |ui| {
+                            for option in options {
+                                ui.selectable_value(
+                                    &mut self.settings.recording_device,
+                                    option.selection,
+                                    option.label,
+                                );
+                            }
+                        });
+                });
                 ui.add_sized([button_width, 30.0], egui::Button::new("Refresh devices"))
                     .on_hover_text("Scan again after connecting or disconnecting a microphone")
                     .clicked()
             })
             .inner;
+        if recording_active {
+            ui.label(help_text(
+                "The microphone choice is locked only while recording or finishing transcription; all other Settings controls remain available.",
+            ));
+        }
         (before != self.settings.recording_device, refresh_requested)
     }
 

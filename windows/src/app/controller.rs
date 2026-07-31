@@ -119,22 +119,26 @@ impl LocalSttApp {
 
 impl LocalSttApp {
     fn handle_user_commands(&mut self, ctx: &egui::Context) -> bool {
+        let tray_action = self.tray.poll_action();
+        if matches!(tray_action, Some(TrayAction::Quit)) {
+            log::debug!("handling tray Quit command");
+            self.lifecycle.request_exit();
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+            return true;
+        }
+
         let hotkey_pressed = self.hotkeys.poll_toggle();
-        if self.hotkeys.is_bound() && hotkey_pressed && !self.settings.open {
+        if should_toggle_recording(
+            self.hotkeys.is_bound(),
+            hotkey_pressed,
+            self.settings.capturing_hotkey,
+        ) {
             self.toggle_record();
         }
-        match self.tray.poll_action() {
-            Some(TrayAction::Settings) => {
-                log::debug!("handling tray Settings command");
-                self.open_settings();
-            }
-            Some(TrayAction::Quit) => {
-                log::debug!("handling tray Quit command");
-                self.lifecycle.request_exit();
-                ctx.send_viewport_cmd(ViewportCommand::Close);
-                return true;
-            }
-            None => {}
+
+        if matches!(tray_action, Some(TrayAction::Settings)) {
+            log::debug!("handling tray Settings command");
+            self.open_settings();
         }
         false
     }
@@ -149,11 +153,7 @@ impl LocalSttApp {
         }
 
         ctx.send_viewport_cmd(ViewportCommand::CancelClose);
-        if self.settings.open {
-            self.close_settings();
-        } else {
-            self.overlay.dismiss();
-        }
+        self.overlay.dismiss();
         false
     }
 
@@ -166,12 +166,8 @@ impl LocalSttApp {
 
     fn request_next_frame(&self, ctx: &egui::Context) {
         let busy = self.settings.open
-            || self.recording
+            || self.recording_pipeline_busy()
             || self.overlay.is_visible()
-            || self
-                .session
-                .as_ref()
-                .is_some_and(|session| session.finishing)
             || self.engine.is_none();
         let interval = if busy { 33 } else { 250 };
         ctx.request_repaint_after(std::time::Duration::from_millis(interval));
@@ -180,11 +176,8 @@ impl LocalSttApp {
     fn render(&mut self, ctx: &egui::Context) {
         if self.settings.open {
             self.render_settings(ctx);
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(Color32::TRANSPARENT))
-                .show(ctx, |_ui| {});
-            return;
         }
+
         if matches!(&self.overlay.state, OverlayState::Hidden) && self.overlay.alpha < 0.01 {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(Color32::TRANSPARENT))
@@ -203,6 +196,14 @@ impl LocalSttApp {
             self.copy_edited_result(text);
         }
     }
+}
+
+fn should_toggle_recording(
+    hotkey_is_bound: bool,
+    hotkey_pressed: bool,
+    capturing_replacement_hotkey: bool,
+) -> bool {
+    hotkey_is_bound && hotkey_pressed && !capturing_replacement_hotkey
 }
 
 impl eframe::App for LocalSttApp {
@@ -228,5 +229,20 @@ impl eframe::App for LocalSttApp {
         self.sync_root_viewport(ctx);
         self.request_next_frame(ctx);
         self.render(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_toggle_recording;
+
+    #[test]
+    fn settings_window_does_not_disable_the_recording_hotkey() {
+        assert!(should_toggle_recording(true, true, false));
+    }
+
+    #[test]
+    fn shortcut_capture_temporarily_consumes_hotkey_input() {
+        assert!(!should_toggle_recording(true, true, true));
     }
 }

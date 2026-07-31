@@ -10,23 +10,6 @@ use super::state::SettingsChanges;
 
 impl LocalSttApp {
     pub(in crate::app) fn open_settings(&mut self) {
-        if self.recording
-            || self
-                .session
-                .as_ref()
-                .is_some_and(|session| session.finishing)
-        {
-            if self.config.show_result_notifications {
-                self.overlay.show_notice(
-                    "Finish the current recording before opening Settings",
-                    false,
-                    self.now(),
-                    self.config.notification_seconds(),
-                );
-            }
-            return;
-        }
-
         self.settings.load_from_config(&self.config);
         self.refresh_recording_devices(false);
         let hotkey_message = if self.settings.message.is_none() {
@@ -41,7 +24,6 @@ impl LocalSttApp {
         }
         self.settings.open = true;
         self.settings.focus_pending = true;
-        self.overlay.dismiss();
     }
 
     pub(super) fn apply_settings_changes(&mut self, changes: SettingsChanges) {
@@ -64,26 +46,36 @@ impl LocalSttApp {
         }
 
         if changes.recording_device {
-            match Recorder::new(self.settings.recording_device.as_ref()) {
-                Ok(recorder) => {
-                    self.recorder = recorder;
-                    self.config
-                        .recording_device
-                        .clone_from(&self.settings.recording_device);
-                    success_message = format!(
-                        "Saved automatically. Recording device: {}",
-                        self.settings.selected_device_label()
-                    );
-                    should_save = true;
-                }
-                Err(error) => {
-                    self.settings
-                        .recording_device
-                        .clone_from(&self.config.recording_device);
-                    self.settings.set_message(
-                        format!("Could not use that recording device: {error:#}"),
-                        false,
-                    );
+            if self.recording_pipeline_busy() {
+                self.settings
+                    .recording_device
+                    .clone_from(&self.config.recording_device);
+                self.settings.set_message(
+                    "Stop the current recording before changing the recording device.",
+                    false,
+                );
+            } else {
+                match Recorder::new(self.settings.recording_device.as_ref()) {
+                    Ok(recorder) => {
+                        self.recorder = recorder;
+                        self.config
+                            .recording_device
+                            .clone_from(&self.settings.recording_device);
+                        success_message = format!(
+                            "Saved automatically. Recording device: {}",
+                            self.settings.selected_device_label()
+                        );
+                        should_save = true;
+                    }
+                    Err(error) => {
+                        self.settings
+                            .recording_device
+                            .clone_from(&self.config.recording_device);
+                        self.settings.set_message(
+                            format!("Could not use that recording device: {error:#}"),
+                            false,
+                        );
+                    }
                 }
             }
         }
@@ -206,15 +198,5 @@ impl LocalSttApp {
         self.settings.open = false;
         self.settings.focus_pending = false;
         self.settings.capturing_hotkey = false;
-        if let Some(problem) = &self.hotkey_problem {
-            self.overlay.show_persistent_notice(
-                format!("{problem} Open the tray menu → Settings to choose another shortcut."),
-                false,
-            );
-        } else if self.config.show_loading_notifications && self.engine.is_none() {
-            self.overlay.show_loading(self.startup_status.clone());
-        } else {
-            self.overlay.dismiss();
-        }
     }
 }

@@ -75,7 +75,10 @@ Visual states are controlled independently:
 - **Show transcription result and result/error notifications**
 
 Temporary notification duration accepts 1–60 seconds. Recording, loading, and
-transcribing indicators remain visible while their operation is active.
+transcribing indicators remain visible while their operation is active. The
+Settings window is independent: notifications and the recording shortcut keep
+working while Settings is open, except while actively capturing a replacement
+shortcut.
 
 ## Usage
 

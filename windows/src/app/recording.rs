@@ -64,6 +64,14 @@ impl LiveSession {
 }
 
 impl LocalSttApp {
+    pub(super) fn recording_pipeline_busy(&self) -> bool {
+        self.recording
+            || self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.finishing)
+    }
+
     fn spawn_chunk(&mut self, id: usize, audio: Vec<f32>) {
         if let Some(session) = self.session.as_mut() {
             session.in_flight += 1;
@@ -238,10 +246,7 @@ impl LocalSttApp {
     fn handle_engine_status(&mut self, message: String) {
         self.startup_status = message.clone();
         self.tray.set_tooltip(&format!("local-stt — {message}"));
-        if self.config.show_loading_notifications
-            && !self.settings.open
-            && self.hotkey_problem.is_none()
-        {
+        if self.config.show_loading_notifications && self.hotkey_problem.is_none() {
             self.overlay.show_loading(message);
         } else if matches!(&self.overlay.state, OverlayState::Loading { .. }) {
             self.overlay.dismiss();
@@ -253,10 +258,6 @@ impl LocalSttApp {
         self.tray
             .set_tooltip(&format!("local-stt — {}", engine.label()));
         self.engine = Some(engine);
-        if self.settings.open {
-            return;
-        }
-
         if let Some(problem) = &self.hotkey_problem {
             self.overlay.show_persistent_notice(
                 format!("{problem} Open the tray menu → Settings and choose another shortcut."),
@@ -282,7 +283,7 @@ impl LocalSttApp {
     fn handle_engine_error(&mut self, error: String) {
         self.startup_status = format!("Model load failed: {error}");
         self.tray.set_tooltip("local-stt — model load failed");
-        if self.config.show_loading_notifications && !self.settings.open {
+        if self.config.show_loading_notifications {
             self.overlay.show_notice(
                 self.startup_status.clone(),
                 false,

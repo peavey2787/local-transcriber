@@ -54,9 +54,9 @@ fn run() -> Result<()> {
         cfg.auto_paste
     );
 
-    // Keep the transparent root window on-screen so Windows continues servicing
-    // its event loop while the tray and global shortcut are idle. Settings use
-    // a separate viewport; transient notifications temporarily expand this one.
+    // Keep one native root window alive for idle control, notifications, and
+    // Settings so tray and shortcut events never depend on a child-window
+    // lifecycle.
     let viewport = egui::ViewportBuilder::default()
         .with_title("local-stt")
         .with_icon(egui::IconData {

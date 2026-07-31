@@ -12,6 +12,8 @@ $distributionDirectory = Join-Path $projectRoot "dist"
 $packageName = "local-stt-windows-x64"
 $packageDirectory = Join-Path $distributionDirectory $packageName
 $archivePath = Join-Path $distributionDirectory "$packageName.zip"
+$stagingRoot = Join-Path $distributionDirectory ".$packageName-staging"
+$stagingPackageDirectory = Join-Path $stagingRoot $packageName
 
 Push-Location $projectRoot
 try {
@@ -25,24 +27,33 @@ try {
         throw "The verified native-runtime receipt is missing."
     }
 
-    if (Test-Path -LiteralPath $packageDirectory) {
-        Remove-Item -LiteralPath $packageDirectory -Recurse -Force
+    if (Test-Path -LiteralPath $stagingRoot) {
+        Remove-Item -LiteralPath $stagingRoot -Recurse -Force
     }
-    New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+    New-Item -ItemType Directory -Path $stagingPackageDirectory -Force | Out-Null
 
-    Copy-Item -LiteralPath $binary -Destination (Join-Path $packageDirectory "local-stt.exe")
+    Copy-Item -LiteralPath $binary -Destination (Join-Path $stagingPackageDirectory "local-stt.exe")
     Get-ChildItem -LiteralPath $libraryDirectory -Filter "*.dll" -File |
-        Copy-Item -Destination $packageDirectory
-    Copy-Item -LiteralPath $runtimeReceipt -Destination (Join-Path $packageDirectory "native-runtime.sha256")
-    Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $packageDirectory
-    Copy-Item -LiteralPath (Join-Path $projectRoot "SECURITY.md") -Destination $packageDirectory
+        Copy-Item -Destination $stagingPackageDirectory
+    Copy-Item -LiteralPath $runtimeReceipt -Destination (Join-Path $stagingPackageDirectory "native-runtime.sha256")
+    Copy-Item -LiteralPath (Join-Path $projectRoot "README.md") -Destination $stagingPackageDirectory
+    Copy-Item -LiteralPath (Join-Path $projectRoot "SECURITY.md") -Destination $stagingPackageDirectory
+
+    New-Item -ItemType Directory -Path $packageDirectory -Force | Out-Null
+    Get-ChildItem -LiteralPath $packageDirectory -Force |
+        Remove-Item -Recurse -Force
+    Get-ChildItem -LiteralPath $stagingPackageDirectory -Force |
+        Copy-Item -Destination $packageDirectory -Recurse
 
     if (Test-Path -LiteralPath $archivePath) {
         Remove-Item -LiteralPath $archivePath -Force
     }
-    Compress-Archive -LiteralPath $packageDirectory -DestinationPath $archivePath -CompressionLevel Optimal
+    Compress-Archive -LiteralPath $stagingPackageDirectory -DestinationPath $archivePath -CompressionLevel Optimal
 }
 finally {
+    if (Test-Path -LiteralPath $stagingRoot) {
+        Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+    }
     Pop-Location
 }
 

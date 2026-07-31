@@ -34,27 +34,13 @@ mod tests {
     }
 
     #[test]
-    fn external_events_target_root_even_when_a_child_was_current() {
+    fn external_events_target_the_persistent_root() {
         let context = egui::Context::default();
         let requested_viewports = Arc::new(Mutex::new(Vec::new()));
         let captured_viewports = requested_viewports.clone();
         context.set_request_repaint_callback(move |request| {
             captured_viewports.lock().push(request.viewport_id);
         });
-
-        let child_viewport = egui::ViewportId::from_hash_of("settings-child");
-        let child_input = egui::RawInput {
-            viewport_id: child_viewport,
-            viewports: [
-                (egui::ViewportId::ROOT, Default::default()),
-                (child_viewport, Default::default()),
-            ]
-            .into_iter()
-            .collect(),
-            ..Default::default()
-        };
-        let _ = context.run(child_input, |_ctx| {});
-        requested_viewports.lock().clear();
 
         let wake = UiWake::default();
         wake.install(&context);

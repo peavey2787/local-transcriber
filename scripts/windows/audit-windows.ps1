@@ -42,14 +42,17 @@ try {
     Write-Host "`n==> Formatting check"
     Invoke-Checked cargo.exe @("fmt", "--all", "--", "--check")
 
-    Write-Host "`n==> Locked dependency metadata"
+    Write-Host "`n==> Locked Windows dependency graph"
     Invoke-Checked cargo.exe @(
-        "metadata",
+        "tree",
+        "--package",
+        "local-transcriber-windows",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--edges",
+        "normal,build",
         "--locked",
-        "--offline",
-        "--no-deps",
-        "--format-version",
-        "1"
+        "--offline"
     ) -DiscardOutput
 
     Write-Host "`n==> Clippy with warnings denied"

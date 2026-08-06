@@ -35,11 +35,3 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
 ] }
-
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1.31"
-
-[package.metadata.winresource]
-FileDescription = "Local speech-to-text powered by NVIDIA Parakeet TDT"
-OriginalFilename = "local-stt.exe"
-ProductName = "local-stt"

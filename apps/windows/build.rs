@@ -17,30 +17,191 @@ mod tray {
 }
 
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const ICON_SIZES: [u32; 9] = [16, 20, 24, 32, 40, 48, tray::APP_ICON_SIZE, 128, 256];
 
 fn main() {
     println!("cargo:rerun-if-changed=../../crates/transcriber-ui/src/tray_icon.rs");
+    println!("cargo:rerun-if-env-changed=RC");
+
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
 
     let output_directory = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo provides OUT_DIR"));
     let icon_path = output_directory.join("local-stt.ico");
-    write_icon_file(&icon_path).expect("generate the local-stt Windows icon");
+    let resource_script_path = output_directory.join("local-stt.rc");
+    let resource_output_path = output_directory.join("local-stt.res");
 
-    let mut resource = winresource::WindowsResource::new();
-    resource.set_icon(
-        icon_path
-            .to_str()
-            .expect("the Cargo output path is valid UTF-8"),
+    write_icon_file(&icon_path).expect("generate the local-stt Windows icon");
+    write_resource_script(&resource_script_path, &icon_path)
+        .expect("generate the local-stt Windows resource script");
+
+    let resource_compiler = find_resource_compiler().unwrap_or_else(|| {
+        panic!(
+            "Windows SDK resource compiler rc.exe was not found. Install the Windows 10/11 SDK or set the RC environment variable to rc.exe."
+        )
+    });
+
+    let status = Command::new(&resource_compiler)
+        .arg("/nologo")
+        .arg("/fo")
+        .arg(&resource_output_path)
+        .arg(&resource_script_path)
+        .status()
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to launch Windows resource compiler {}: {error}",
+                resource_compiler.display()
+            )
+        });
+
+    if !status.success() {
+        panic!(
+            "Windows resource compiler {} exited with {status}",
+            resource_compiler.display()
+        );
+    }
+
+    println!(
+        "cargo:rustc-link-arg-bin=local-stt-rs={}",
+        resource_output_path.display()
     );
-    resource
-        .compile()
-        .expect("compile the local-stt Windows resources");
+}
+
+fn find_resource_compiler() -> Option<PathBuf> {
+    if let Some(explicit) = env::var_os("RC") {
+        let path = PathBuf::from(explicit);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    if let Some(path) = find_on_path("rc.exe") {
+        return Some(path);
+    }
+
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "x86_64".to_owned());
+    let sdk_arch = match target_arch.as_str() {
+        "x86_64" => "x64",
+        "x86" => "x86",
+        "aarch64" => "arm64",
+        _ => "x64",
+    };
+
+    for variable in ["ProgramFiles(x86)", "ProgramFiles"] {
+        let Some(program_files) = env::var_os(variable) else {
+            continue;
+        };
+        let bin_root = PathBuf::from(program_files)
+            .join("Windows Kits")
+            .join("10")
+            .join("bin");
+        let Ok(entries) = fs::read_dir(&bin_root) else {
+            continue;
+        };
+
+        let mut versions = entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        versions.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+
+        for version_directory in versions {
+            let candidate = version_directory.join(sdk_arch).join("rc.exe");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn find_on_path(executable: &str) -> Option<PathBuf> {
+    let output = Command::new("where.exe").arg(executable).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+}
+
+fn write_resource_script(path: &Path, icon_path: &Path) -> std::io::Result<()> {
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".to_owned());
+    let numeric_version = numeric_version(&version);
+    let icon = resource_string(icon_path.as_os_str());
+
+    let script = format!(
+        r#"1 ICON "{icon}"
+
+1 VERSIONINFO
+FILEVERSION {numeric_version}
+PRODUCTVERSION {numeric_version}
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "FileDescription", "Local speech-to-text powered by NVIDIA Parakeet TDT\0"
+            VALUE "FileVersion", "{version}\0"
+            VALUE "OriginalFilename", "local-stt.exe\0"
+            VALUE "ProductName", "local-stt\0"
+            VALUE "ProductVersion", "{version}\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 1200
+    END
+END
+"#
+    );
+
+    fs::write(path, script)
+}
+
+fn numeric_version(version: &str) -> String {
+    let mut components = version
+        .split('.')
+        .map(|component| {
+            component
+                .chars()
+                .take_while(|character| character.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u16>()
+                .unwrap_or(0)
+        })
+        .take(4)
+        .collect::<Vec<_>>();
+    components.resize(4, 0);
+    components
+        .into_iter()
+        .map(|component| component.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn resource_string(value: &OsStr) -> String {
+    value
+        .to_string_lossy()
+        .replace('\\', "/")
+        .replace('"', "\"\"")
 }
 
 fn write_icon_file(path: &Path) -> std::io::Result<()> {

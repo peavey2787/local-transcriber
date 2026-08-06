@@ -19,9 +19,12 @@ for %%F in (sherpa-onnx-c-api.dll onnxruntime.dll) do (
     )
 )
 
-"%BINARY%" %*
-set "RC=!ERRORLEVEL!"
-if not "!RC!"=="0" goto :fail
+start "" /D "%RELEASE_DIRECTORY%" "%BINARY%" %*
+if errorlevel 1 (
+    set "RC=!ERRORLEVEL!"
+    if "!RC!"=="0" set "RC=1"
+    goto :fail
+)
 exit /b 0
 
 :fail

@@ -1,6 +1,10 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+set "BUILD_NO_PAUSE=0"
+if /I "%~1"=="--no-pause" set "BUILD_NO_PAUSE=1"
+if /I "%~1"=="/no-pause" set "BUILD_NO_PAUSE=1"
+
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "LIBRARY_DIRECTORY=%PROJECT_ROOT%\.native\lib"
 set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
@@ -71,8 +75,9 @@ echo.
 echo Next, run the application with:
 echo   %~dp0run-windows.cmd
 echo ============================================================
-if not defined LT_NO_PAUSE (
+if "%BUILD_NO_PAUSE%"=="0" (
     echo.
+    set "BUILD_DONE="
     set /p "BUILD_DONE=Press Enter to close this window..."
 )
 exit /b 0
@@ -91,7 +96,7 @@ popd
 
 :fail
 if not defined RC set "RC=1"
-if not defined LT_NO_PAUSE (
+if "%BUILD_NO_PAUSE%"=="0" (
     echo.
     echo Windows build failed with exit code !RC!.
     echo Review the error above, then press any key to close this window.

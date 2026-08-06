@@ -25,16 +25,8 @@ if errorlevel 1 (
     goto :fail
 )
 
-set "SAVED_NO_PAUSE=%LT_NO_PAUSE%"
-set "LT_NO_PAUSE=1"
-call "%~dp0build-windows.cmd"
+call "%~dp0build-windows.cmd" --no-pause
 set "RC=!ERRORLEVEL!"
-if defined SAVED_NO_PAUSE (
-    set "LT_NO_PAUSE=!SAVED_NO_PAUSE!"
-) else (
-    set "LT_NO_PAUSE="
-)
-set "SAVED_NO_PAUSE="
 if not "!RC!"=="0" goto :fail
 
 set "BINARY=%RELEASE_DIRECTORY%\local-stt-rs.exe"

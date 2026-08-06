@@ -7,7 +7,8 @@ use std::time::Duration;
 use anyhow::{bail, Result};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_V,
+    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL,
+    VK_RETURN, VK_V,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, IsWindow, SetForegroundWindow,
@@ -54,6 +55,30 @@ impl PasteTarget {
             );
         }
 
+        Ok("Windows SendInput")
+    }
+
+    pub(crate) fn press_enter(&self) -> Result<&'static str> {
+        thread::sleep(Duration::from_millis(50));
+        self.restore_focus()?;
+        let inputs = [
+            keyboard_input(VK_RETURN, 0),
+            keyboard_input(VK_RETURN, KEYEVENTF_KEYUP),
+        ];
+        // SAFETY: `inputs` is a contiguous initialized INPUT array.
+        let inserted = unsafe {
+            SendInput(
+                inputs.len() as u32,
+                inputs.as_ptr(),
+                size_of::<INPUT>() as i32,
+            )
+        };
+        if inserted != inputs.len() as u32 {
+            bail!(
+                "Windows accepted {inserted} of {} Enter input events",
+                inputs.len()
+            );
+        }
         Ok("Windows SendInput")
     }
 

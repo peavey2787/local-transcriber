@@ -133,6 +133,8 @@ impl LocalSttApp {
 
     fn copy_preferences_from_form(&mut self) {
         self.config.auto_paste = self.settings.auto_paste;
+        self.config.append_trailing_space = self.settings.append_trailing_space;
+        self.config.press_enter_after_paste = self.settings.press_enter_after_paste;
         self.config.notification_duration_seconds = self.settings.notification_duration_seconds;
         self.config.show_loading_notifications = self.settings.loading_notifications;
         self.config.show_recording_notifications = self.settings.recording_notifications;

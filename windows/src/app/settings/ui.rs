@@ -233,7 +233,9 @@ impl LocalSttApp {
 
     fn draw_auto_paste_section(&mut self, ui: &mut egui::Ui) -> bool {
         ui.add_space(16.0);
-        let changed = ui
+        ui.label(RichText::new("Transcription delivery").strong());
+
+        let mut changed = ui
             .checkbox(
                 &mut self.settings.auto_paste,
                 "Automatically paste the transcription with Ctrl+V",
@@ -241,6 +243,33 @@ impl LocalSttApp {
             .changed();
         ui.label(help_text(
             "The result is copied first. A successful auto-paste does not show the editable result textbox.",
+        ));
+
+        changed |= ui
+            .checkbox(
+                &mut self.settings.append_trailing_space,
+                "Add a space at the end of each transcription",
+            )
+            .changed();
+        ui.label(help_text(
+            "Applies to clipboard text, automatic paste, and the editable result.",
+        ));
+
+        if !self.settings.auto_paste && self.settings.press_enter_after_paste {
+            self.settings.press_enter_after_paste = false;
+            changed = true;
+        }
+        changed |= ui
+            .add_enabled(
+                self.settings.auto_paste,
+                egui::Checkbox::new(
+                    &mut self.settings.press_enter_after_paste,
+                    "Press Enter after automatically pasting",
+                ),
+            )
+            .changed();
+        ui.label(help_text(
+            "Enter is sent only after a successful automatic paste, never when the result is only copied.",
         ));
         changed
     }

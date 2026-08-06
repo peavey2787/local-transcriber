@@ -23,6 +23,12 @@ pub(crate) struct Config {
     /// Copy every result to the clipboard and then synthesize Ctrl+V.
     #[serde(default)]
     pub(crate) auto_paste: bool,
+    /// Add one trailing space to non-empty transcription text before delivery.
+    #[serde(default)]
+    pub(crate) append_trailing_space: bool,
+    /// Press Enter after a successful automatic paste.
+    #[serde(default)]
+    pub(crate) press_enter_after_paste: bool,
     /// Seconds before temporary notices and untouched results close.
     #[serde(default = "default_notification_seconds")]
     pub(crate) notification_duration_seconds: u32,
@@ -59,6 +65,8 @@ impl Default for Config {
             hotkey: default_hotkey(),
             recording_device: None,
             auto_paste: false,
+            append_trailing_space: false,
+            press_enter_after_paste: false,
             notification_duration_seconds: default_notification_seconds(),
             show_loading_notifications: true,
             show_recording_notifications: true,
@@ -197,5 +205,7 @@ mod tests {
         assert!(!json.contains("show_notifications"));
         assert!(!json.contains("\"model\""));
         assert!(json.contains("notification_duration_seconds"));
+        assert!(json.contains("append_trailing_space"));
+        assert!(json.contains("press_enter_after_paste"));
     }
 }

@@ -35,6 +35,7 @@ impl LocalSttApp {
             let overlay_width = CARD_W.min((monitor.x - 24.0).max(360.0));
             let x = ((monitor.x - overlay_width) * 0.5).max(0.0);
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(x, 70.0)));
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(
                 overlay_width,

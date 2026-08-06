@@ -81,6 +81,11 @@ impl LocalSttApp {
                 if mode_changed || height_changed {
                     configure_notification_viewport(height, ctx);
                 }
+                // Win+D and the taskbar "Show desktop" command can minimize an
+                // already-visible always-on-top window without changing our app
+                // presentation mode. Reassert only non-activating visibility
+                // commands while a notification is meant to be shown.
+                keep_notification_visible(ctx);
             }
             RootViewportMode::Settings => {
                 if mode_changed {
@@ -116,6 +121,12 @@ fn configure_notification_viewport(height: f32, ctx: &egui::Context) {
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
+}
+
+fn keep_notification_visible(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
 }
 
 fn configure_settings_viewport(ctx: &egui::Context) {

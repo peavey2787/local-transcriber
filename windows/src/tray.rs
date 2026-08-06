@@ -6,8 +6,28 @@ use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 
 use crate::hotkey::friendly_name;
-use crate::icon::{mic_icon_rgba, APP_ICON_SIZE};
+use crate::icon::{mic_icon_rgba_with_color, APP_ICON_SIZE, IDLE_ICON_COLOR};
 use crate::ui_wake::UiWake;
+
+const RECORDING_COLOR: [u8; 4] = [0xD7, 0x3F, 0x3F, 0xFF];
+const BUSY_COLOR: [u8; 4] = [0xE6, 0x91, 0x38, 0xFF];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrayStatus {
+    Idle,
+    Recording,
+    Busy,
+}
+
+impl TrayStatus {
+    fn color(self) -> [u8; 4] {
+        match self {
+            Self::Idle => IDLE_ICON_COLOR,
+            Self::Recording => RECORDING_COLOR,
+            Self::Busy => BUSY_COLOR,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
@@ -29,11 +49,17 @@ fn hotkey_menu_text(hotkey: &str) -> String {
     }
 }
 
+fn status_icon(status: TrayStatus) -> Result<Icon> {
+    Icon::from_rgba(
+        mic_icon_rgba_with_color(APP_ICON_SIZE, status.color()),
+        APP_ICON_SIZE,
+        APP_ICON_SIZE,
+    )
+    .context("tray icon from rgba")
+}
+
 impl Tray {
     pub fn new(hotkey: &str, ui_wake: UiWake) -> Result<Self> {
-        let icon = Icon::from_rgba(mic_icon_rgba(APP_ICON_SIZE), APP_ICON_SIZE, APP_ICON_SIZE)
-            .context("tray icon from rgba")?;
-
         let settings = MenuItem::new("Settings…", true, None);
         let settings_id = settings.id().clone();
         let quit = MenuItem::new("Quit", true, None);
@@ -68,7 +94,7 @@ impl Tray {
         let tray = TrayIconBuilder::new()
             .with_menu(Box::new(menu))
             .with_tooltip("local-stt — loading model…")
-            .with_icon(icon)
+            .with_icon(status_icon(TrayStatus::Busy)?)
             .build()
             .context("build tray icon")?;
 
@@ -81,6 +107,17 @@ impl Tray {
 
     pub fn set_tooltip(&self, tip: &str) {
         let _ = self.icon.set_tooltip(Some(tip));
+    }
+
+    pub fn set_status(&self, status: TrayStatus) {
+        match status_icon(status) {
+            Ok(icon) => {
+                if let Err(error) = self.icon.set_icon(Some(icon)) {
+                    log::warn!("could not update tray status icon: {error}");
+                }
+            }
+            Err(error) => log::warn!("could not render tray status icon: {error:#}"),
+        }
     }
 
     pub fn set_hotkey_hint(&self, hotkey: &str) {

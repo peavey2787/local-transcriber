@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::hotkey::friendly_name;
 use crate::overlay::OverlayState;
+use crate::tray::TrayStatus;
 use crate::paste::PasteTarget;
 use crate::util::SAMPLE_RATE;
 
@@ -144,6 +145,7 @@ impl LocalSttApp {
         } else {
             self.overlay.dismiss();
         }
+        self.tray.set_status(TrayStatus::Recording);
         self.tray.set_tooltip("local-stt — recording…");
         println!("[local-stt] recording (live {LIVE_CHUNK_SECS}s chunks)");
     }
@@ -173,6 +175,7 @@ impl LocalSttApp {
         } else {
             self.overlay.dismiss();
         }
+        self.tray.set_status(TrayStatus::Busy);
         self.tray.set_tooltip("local-stt — transcribing…");
         println!("[local-stt] stopped — expecting {expected} chunks");
 
@@ -209,6 +212,7 @@ impl LocalSttApp {
         } else {
             self.present_transcription_failure(text, errors);
         }
+        self.tray.set_status(TrayStatus::Idle);
         self.tray.set_tooltip("local-stt — Parakeet ready");
         self.session = None;
         self.paste_target = None;
@@ -246,6 +250,7 @@ impl LocalSttApp {
 
     fn handle_engine_ready(&mut self, engine: std::sync::Arc<crate::asr::AsrEngine>) {
         self.startup_status = "Parakeet ready".into();
+        self.tray.set_status(TrayStatus::Idle);
         self.tray
             .set_tooltip(&format!("local-stt — {}", engine.label()));
         self.engine = Some(engine);
@@ -277,6 +282,7 @@ impl LocalSttApp {
 
     fn handle_engine_error(&mut self, error: String) {
         self.startup_status = format!("Model load failed: {error}");
+        self.tray.set_status(TrayStatus::Idle);
         self.tray.set_tooltip("local-stt — model load failed");
         if self.config.show_loading_notifications && !self.settings.open {
             self.overlay

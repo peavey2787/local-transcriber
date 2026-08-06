@@ -12,6 +12,7 @@ impl LocalSttApp {
             return;
         }
 
+        let text = prepare_transcription_text(text, self.config.append_trailing_space);
         log::info!(
             "transcription completed ({} characters)",
             text.chars().count()
@@ -109,6 +110,16 @@ impl LocalSttApp {
         match target.paste_ctrl_v() {
             Ok(backend) => {
                 log::info!("transcription auto-pasted with {backend}");
+                if self.config.press_enter_after_paste {
+                    if let Err(error) = target.press_enter() {
+                        self.show_result_error(
+                            format!("The transcription was pasted, but Enter could not be sent: {error}"),
+                            now,
+                        );
+                        return;
+                    }
+                    log::info!("Enter sent after automatic paste");
+                }
                 // Direct insertion intentionally bypasses the editable result window.
                 self.overlay.dismiss();
             }
@@ -157,5 +168,25 @@ impl LocalSttApp {
         } else {
             self.overlay.dismiss();
         }
+    }
+}
+
+fn prepare_transcription_text(mut text: String, append_trailing_space: bool) -> String {
+    if append_trailing_space && !text.is_empty() && !text.chars().last().is_some_and(char::is_whitespace) {
+        text.push(' ');
+    }
+    text
+}
+
+#[cfg(test)]
+mod delivery_tests {
+    use super::prepare_transcription_text;
+
+    #[test]
+    fn optional_space_is_added_once_to_non_empty_text() {
+        assert_eq!(prepare_transcription_text("hello".into(), true), "hello ");
+        assert_eq!(prepare_transcription_text("hello ".into(), true), "hello ");
+        assert_eq!(prepare_transcription_text(String::new(), true), "");
+        assert_eq!(prepare_transcription_text("hello".into(), false), "hello");
     }
 }

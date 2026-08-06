@@ -29,6 +29,8 @@ pub(in crate::app) struct SettingsState {
     pub(super) input_devices: Vec<InputDeviceOption>,
     devices_loading: bool,
     pub(super) auto_paste: bool,
+    pub(super) append_trailing_space: bool,
+    pub(super) press_enter_after_paste: bool,
     pub(super) notification_duration_seconds: u32,
     pub(super) loading_notifications: bool,
     pub(super) recording_notifications: bool,
@@ -46,6 +48,8 @@ impl SettingsState {
             input_devices: Vec::new(),
             devices_loading: false,
             auto_paste: false,
+            append_trailing_space: false,
+            press_enter_after_paste: false,
             notification_duration_seconds: 0,
             loading_notifications: false,
             recording_notifications: false,
@@ -63,6 +67,8 @@ impl SettingsState {
         self.recording_device.clone_from(&config.recording_device);
         self.ensure_saved_device_choices();
         self.auto_paste = config.auto_paste;
+        self.append_trailing_space = config.append_trailing_space;
+        self.press_enter_after_paste = config.press_enter_after_paste;
         self.notification_duration_seconds = config
             .notification_duration_seconds
             .clamp(MIN_NOTIFICATION_SECONDS, MAX_NOTIFICATION_SECONDS);

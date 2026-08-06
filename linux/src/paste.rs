@@ -54,6 +54,33 @@ impl PasteTarget {
 
         bail!("no paste backend found; install xdotool for X11, or wtype/ydotool for Wayland")
     }
+
+    pub fn press_enter(&self) -> Result<&'static str> {
+        thread::sleep(Duration::from_millis(50));
+        if let Some(window) = self.x11_window.as_deref() {
+            if command_exists("xdotool") {
+                run_backend(
+                    "xdotool",
+                    ["key", "--window", window, "--clearmodifiers", "Return"],
+                )?;
+                return Ok("xdotool");
+            }
+        }
+        if is_wayland_session() && command_exists("wtype") {
+            run_backend("wtype", ["-k", "Return"])?;
+            return Ok("wtype");
+        }
+        if env::var_os("DISPLAY").is_some() && command_exists("xdotool") {
+            run_backend("xdotool", ["key", "--clearmodifiers", "Return"])?;
+            return Ok("xdotool");
+        }
+        if command_exists("ydotool") {
+            // Linux input-event code: KEY_ENTER=28.
+            run_backend("ydotool", ["key", "28:1", "28:0"])?;
+            return Ok("ydotool");
+        }
+        bail!("no keyboard backend found for Enter; install xdotool, wtype, or ydotool")
+    }
 }
 
 fn capture_x11_window() -> Option<String> {

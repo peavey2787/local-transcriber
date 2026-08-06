@@ -43,17 +43,7 @@ try {
     Invoke-Checked cargo.exe @("fmt", "--all", "--", "--check")
 
     Write-Host "`n==> Locked Windows dependency graph"
-    Invoke-Checked cargo.exe @(
-        "tree",
-        "--package",
-        "local-transcriber-windows",
-        "--target",
-        "x86_64-pc-windows-msvc",
-        "--edges",
-        "normal,build",
-        "--locked",
-        "--offline"
-    ) -DiscardOutput
+    & (Join-Path $PSScriptRoot "resolve-windows-lock.ps1") -Offline
 
     Write-Host "`n==> Clippy with warnings denied"
     Invoke-Checked cargo.exe @("clippy", "-p", "transcriber-core", "-p", "transcriber-ui", "-p", "local-transcriber-windows", "--all-targets", "--locked", "--offline", "--", "-D", "warnings")

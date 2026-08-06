@@ -15,7 +15,7 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
     throw "This launcher supports only Windows."
 }
 if (-not (Test-Path -LiteralPath $binary -PathType Leaf)) {
-    throw "The release binary is missing. Run .\scripts\windows\build-windows.ps1 first."
+    throw "The release binary is missing. Run .\scripts\windows\build-windows.cmd first."
 }
 foreach ($fileName in @("sherpa-onnx-c-api.dll", "onnxruntime.dll")) {
     if (-not (Test-Path -LiteralPath (Join-Path $releaseDirectory $fileName) -PathType Leaf)) {

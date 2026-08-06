@@ -23,10 +23,7 @@ if ($hostLine -ne "host: x86_64-pc-windows-msvc") {
 
 Push-Location $projectRoot
 try {
-    & cargo.exe tree --package local-transcriber-windows --target x86_64-pc-windows-msvc --edges normal,build --locked | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Cargo.lock does not match the Windows dependency graph."
-    }
+    & (Join-Path $PSScriptRoot "resolve-windows-lock.ps1")
 
     & (Join-Path $PSScriptRoot "prepare-sherpa-runtime.ps1")
     $env:SHERPA_ONNX_LIB_DIR = $libraryDirectory

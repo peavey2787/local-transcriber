@@ -52,16 +52,56 @@ pub fn matching_command(commands: &[VoiceCommand], spoken: &str) -> Option<Voice
         .cloned()
 }
 
+/// Bounded, user-visible output produced by one platform script runner.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScriptOutput {
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl ScriptOutput {
+    pub fn is_empty(&self) -> bool {
+        self.stdout.trim().is_empty() && self.stderr.trim().is_empty()
+    }
+
+    pub fn display_text(&self) -> String {
+        let stdout = self.stdout.trim();
+        let stderr = self.stderr.trim();
+        match (stdout.is_empty(), stderr.is_empty()) {
+            (false, false) => format!("{stdout}\n{stderr}"),
+            (false, true) => stdout.to_string(),
+            (true, false) => stderr.to_string(),
+            (true, true) => String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub scripts: Vec<ScriptOutput>,
+}
+
+impl CommandOutput {
+    pub fn display_text(&self) -> String {
+        self.scripts
+            .iter()
+            .filter(|output| !output.is_empty())
+            .map(ScriptOutput::display_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
 /// Focused native boundary for allowed script formats and process launching.
 pub trait ScriptRunner: Send + Sync {
     fn validate_script(&self, script: &str) -> Result<()>;
-    fn run_script(&self, script: &str) -> Result<()>;
+    fn run_script(&self, script: &str) -> Result<ScriptOutput>;
 }
 
 #[derive(Debug)]
 pub struct CommandExecutionResult {
     pub phrase: String,
-    pub result: Result<(), String>,
+    pub result: Result<CommandOutput, String>,
 }
 
 pub struct CommandWorker {
@@ -72,10 +112,7 @@ pub struct CommandWorker {
 }
 
 impl CommandWorker {
-    pub fn new(
-        runner: Arc<dyn ScriptRunner>,
-        wake: Arc<dyn Fn() + Send + Sync>,
-    ) -> Self {
+    pub fn new(runner: Arc<dyn ScriptRunner>, wake: Arc<dyn Fn() + Send + Sync>) -> Self {
         let (result_tx, result_rx) = unbounded();
         Self {
             runner,
@@ -95,8 +132,8 @@ impl CommandWorker {
         let wake = self.wake.clone();
         thread::spawn(move || {
             let phrase = command.phrase.clone();
-            let result = execute_command(&command, runner.as_ref())
-                .map_err(|error| format!("{error:#}"));
+            let result =
+                execute_command(&command, runner.as_ref()).map_err(|error| format!("{error:#}"));
             let _ = result_tx.send(CommandExecutionResult { phrase, result });
             wake();
         });
@@ -107,10 +144,7 @@ impl CommandWorker {
     }
 }
 
-pub fn validate_command_list(
-    commands: &[VoiceCommand],
-    runner: &dyn ScriptRunner,
-) -> Result<()> {
+pub fn validate_command_list(commands: &[VoiceCommand], runner: &dyn ScriptRunner) -> Result<()> {
     if commands.is_empty() {
         bail!("Add at least one command before enabling the feature");
     }
@@ -139,18 +173,22 @@ pub fn validate_command_list(
     Ok(())
 }
 
-pub fn execute_command(command: &VoiceCommand, runner: &dyn ScriptRunner) -> Result<()> {
+pub fn execute_command(command: &VoiceCommand, runner: &dyn ScriptRunner) -> Result<CommandOutput> {
+    let mut output = CommandOutput::default();
     for (index, script) in command.scripts.iter().enumerate() {
         println!(
-            "[local-stt] starting voice-command script {}/{}",
+            "[local-stt] starting voice-command script {}/{}: {}",
             index + 1,
-            command.scripts.len()
+            command.scripts.len(),
+            script
         );
-        runner
-            .run_script(script)
-            .with_context(|| format!("run script {script}"))?;
+        output.scripts.push(
+            runner
+                .run_script(script)
+                .with_context(|| format!("run script {script}"))?,
+        );
     }
-    Ok(())
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -164,8 +202,8 @@ mod tests {
             Ok(())
         }
 
-        fn run_script(&self, _script: &str) -> Result<()> {
-            Ok(())
+        fn run_script(&self, _script: &str) -> Result<ScriptOutput> {
+            Ok(ScriptOutput::default())
         }
     }
 
@@ -199,5 +237,19 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("overlap"));
+    }
+
+    #[test]
+    fn command_output_combines_nonempty_script_output() {
+        let output = CommandOutput {
+            scripts: vec![
+                ScriptOutput {
+                    stdout: "Hello World\n".into(),
+                    stderr: String::new(),
+                },
+                ScriptOutput::default(),
+            ],
+        };
+        assert_eq!(output.display_text(), "Hello World");
     }
 }

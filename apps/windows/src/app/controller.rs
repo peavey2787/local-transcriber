@@ -184,6 +184,15 @@ impl LocalSttApp {
 
         let presses = self.hotkeys.poll();
         let panel_visible = self.settings_window.is_visible() || self.voice_commands.open;
+        if self.voice_commands.open
+            && presses.voice_command
+            && !self.voice_commands.form.capturing_hotkey
+        {
+            self.voice_commands.set_message(
+                "Voice-command recording is paused while this editor is open. Use Test scripts here, or close the window before pressing the voice-command hotkey.",
+                false,
+            );
+        }
         if should_toggle_recording(
             self.hotkeys.is_bound(),
             presses.recording,

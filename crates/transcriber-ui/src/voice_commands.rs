@@ -86,6 +86,7 @@ pub struct VoiceCommandsPanelResponse {
     pub save_requested: bool,
     pub close_requested: bool,
     pub browse_request: Option<(usize, usize)>,
+    pub test_request: Option<usize>,
 }
 
 fn help_text(text: impl Into<String>) -> RichText {
@@ -269,6 +270,9 @@ fn draw_command_list(
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Delete command").clicked() {
                             remove_command = Some(command_index);
+                        }
+                        if ui.button("Test scripts").clicked() {
+                            response.test_request = Some(command_index);
                         }
                     });
                 });

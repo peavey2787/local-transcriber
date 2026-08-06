@@ -77,10 +77,6 @@ impl Hotkeys {
         self.bindings.configure_voice_commands(enabled, shortcut)
     }
 
-    pub fn disable_voice_commands(&mut self) {
-        self.bindings.disable_voice_commands();
-    }
-
     pub fn is_bound(&self) -> bool {
         self.bindings.is_bound()
     }

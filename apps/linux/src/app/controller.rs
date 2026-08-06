@@ -169,7 +169,16 @@ impl LocalSttApp {
         }
 
         if self.settings.open || self.voice_commands.open {
-            let _ = self.hotkeys.poll();
+            let presses = self.hotkeys.poll();
+            if self.voice_commands.open
+                && presses.voice_command
+                && !self.voice_commands.form.capturing_hotkey
+            {
+                self.voice_commands.set_message(
+                    "Voice-command recording is paused while this editor is open. Use Test scripts here, or close the window before pressing the voice-command hotkey.",
+                    false,
+                );
+            }
             return false;
         }
 

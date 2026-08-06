@@ -5,7 +5,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Arc;
-use transcriber_core::commands::{CommandWorker, ScriptRunner};
+use transcriber_core::commands::{CommandWorker, ScriptOutput, ScriptRunner};
 
 struct WindowsScriptRunner;
 
@@ -14,8 +14,9 @@ impl ScriptRunner for WindowsScriptRunner {
         validate_script_path(script)
     }
 
-    fn run_script(&self, script: &str) -> Result<()> {
-        execute_script(script)
+    fn run_script(&self, script: &str) -> Result<ScriptOutput> {
+        execute_script(script)?;
+        Ok(ScriptOutput::default())
     }
 }
 

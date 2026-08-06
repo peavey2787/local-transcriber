@@ -2,27 +2,40 @@
 
 use anyhow::{bail, Context, Result};
 use std::collections::HashSet;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
 
 use crate::config::VoiceCommand;
 
+/// Produces a stable phrase key for speech-recognition output and configured
+/// aliases. Letter and number runs are preserved, case is folded, and all
+/// whitespace, punctuation, control, and invisible formatting characters are
+/// treated as word boundaries.
 pub(crate) fn normalize_phrase(value: &str) -> String {
-    value
-        .split_whitespace()
-        .map(|word| {
-            word.trim_matches(|character: char| {
-                character.is_ascii_punctuation()
-                    || matches!(
-                        character,
-                        '“' | '”' | '‘' | '’' | '…' | '—' | '–'
-                    )
-            })
-        })
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut normalized = String::new();
+    let mut needs_separator = false;
+
+    for character in value.chars() {
+        if matches!(
+            character,
+            '\u{00ad}' | '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}' | '\u{feff}'
+        ) {
+            continue;
+        }
+        if character.is_alphanumeric() {
+            if needs_separator && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            for lowercase in character.to_lowercase() {
+                normalized.push(lowercase);
+            }
+            needs_separator = false;
+        } else {
+            needs_separator = !normalized.is_empty();
+        }
+    }
+
+    normalized
 }
 
 fn normalized_aliases(value: &str) -> impl Iterator<Item = String> + '_ {
@@ -73,9 +86,13 @@ pub(crate) fn validate_command_list(commands: &[VoiceCommand]) -> Result<()> {
 }
 
 pub(crate) fn execute_command(command: &VoiceCommand) -> Result<()> {
-    for script in &command.scripts {
-        execute_script(script)
-            .with_context(|| format!("run script {} for {:?}", script, command.phrase))?;
+    for (index, script) in command.scripts.iter().enumerate() {
+        println!(
+            "[local-stt] starting voice-command script {}/{}",
+            index + 1,
+            command.scripts.len()
+        );
+        execute_script(script).with_context(|| format!("run script {}", script))?;
     }
     Ok(())
 }
@@ -102,37 +119,54 @@ fn validate_script_path(script: &str) -> Result<()> {
     Ok(())
 }
 
+fn canonical_script_path(script: &str) -> Result<PathBuf> {
+    let path = Path::new(script.trim());
+    path.canonicalize()
+        .with_context(|| format!("resolve script path {}", path.display()))
+}
+
 fn execute_script(script: &str) -> Result<()> {
     validate_script_path(script)?;
-    let path = Path::new(script.trim());
+    let path = canonical_script_path(script)?;
+    let working_directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     let extension = path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    let output = match extension.as_str() {
-        "sh" | "bash" => Command::new("bash").arg(path).output(),
-        "py" => Command::new("python3").arg(path).output(),
+
+    let mut command = match extension.as_str() {
+        "sh" | "bash" => Command::new("bash"),
+        "py" => Command::new("python3"),
         _ => unreachable!("validated extension"),
-    }
-    .with_context(|| format!("start {}", path.display()))?;
-    ensure_success(path, output)
+    };
+    let status = command
+        .arg(&path)
+        .current_dir(working_directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("start {}", path.display()))?;
+    ensure_success(&path, status)
 }
 
-fn ensure_success(path: &Path, output: Output) -> Result<()> {
-    if output.status.success() {
+fn ensure_success(path: &Path, status: ExitStatus) -> Result<()> {
+    if status.success() {
+        println!("[local-stt] voice-command script completed: {}", path.display());
         return Ok(());
     }
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    if stderr.is_empty() {
-        bail!("{} exited with {}", path.display(), output.status);
-    }
-    bail!("{} failed: {stderr}", path.display())
+    bail!("{} exited with {}", path.display(), status)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn matching_ignores_case_whitespace_and_surrounding_punctuation() {
@@ -160,6 +194,18 @@ mod tests {
         assert!(matching_command(&commands, "Hello there?").is_some());
         assert!(matching_command(&commands, "start report.").is_some());
         assert!(matching_command(&commands, "hello report").is_none());
+    }
+
+    #[test]
+    fn unicode_and_invisible_punctuation_are_normalized() {
+        let commands = vec![VoiceCommand {
+            phrase: "Open reports".into(),
+            scripts: vec!["/tmp/report.sh".into()],
+        }];
+
+        assert!(matching_command(&commands, "“OPEN\u{200b} reports…”").is_some());
+        assert_eq!(normalize_phrase("hel\u{200b}lo"), "hello");
+        assert_eq!(normalize_phrase("hello—there"), "hello there");
     }
 
     #[test]
@@ -193,5 +239,26 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("overlap"));
+    }
+
+    #[test]
+    fn shell_script_runs_from_its_own_directory() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "local-stt-voice-command-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("payload.txt"), "ran").unwrap();
+        let script = directory.join("command.sh");
+        fs::write(&script, "#!/usr/bin/env bash\ncat payload.txt > result.txt\n").unwrap();
+
+        execute_script(script.to_str().unwrap()).unwrap();
+
+        assert_eq!(fs::read_to_string(directory.join("result.txt")).unwrap(), "ran");
+        fs::remove_dir_all(directory).unwrap();
     }
 }

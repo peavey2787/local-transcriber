@@ -475,8 +475,8 @@ impl LocalSttApp {
     }
 
     pub(super) fn dispatch_voice_command(&mut self, spoken: String) {
-        log::info!("voice-command transcript: {:?}", spoken.trim());
         let Some(command) = matching_command(&self.config.voice_commands, &spoken) else {
+            eprintln!("[local-stt] recognized voice command did not match a configured alias");
             self.restore_idle_tray_after_command();
             if self.config.show_result_notifications {
                 let message = if spoken.trim().is_empty() {
@@ -496,11 +496,7 @@ impl LocalSttApp {
             return;
         };
 
-        log::info!(
-            "voice command matched {:?} from transcript {:?}",
-            command.phrase,
-            spoken.trim()
-        );
+        println!("[local-stt] voice command matched; starting script chain");
         self.voice_commands.running = true;
         self.tray.set_status(TrayStatus::Busy);
         self.tray
@@ -543,7 +539,7 @@ impl LocalSttApp {
                     }
                 }
                 Err(error) => {
-                    log::error!("voice command {:?} failed: {error}", event.phrase);
+                    eprintln!("[local-stt] voice command {:?} failed: {error}", event.phrase);
                     if self.config.show_result_notifications {
                         self.overlay.show_notice(
                             format!("Voice command failed: {error}"),

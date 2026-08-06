@@ -11,7 +11,7 @@ recording began and pastes the result there.
 ## Requirements
 
 - 64-bit Windows 10 or Windows 11
-- PowerShell
+- Windows Command Prompt (`cmd.exe`)
 - The stable `x86_64-pc-windows-msvc` Rust toolchain
 - Visual Studio 2022 Build Tools with the Desktop development with C++ workload
 
@@ -22,14 +22,14 @@ The application and bundled Sherpa runtime currently target Windows x64 only.
 From PowerShell at the repository root:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\build-windows.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\run-windows.ps1
+.\scripts\windows\build-windows.cmd
+.\scripts\windows\run-windows.cmd
 ```
 
 The build script downloads the pinned Windows Sherpa/ONNX runtime, verifies its
 SHA-256, validates `Cargo.lock`, and creates a release build. It never requests
-administrator access. The process-scoped execution-policy override lets the
-local scripts run without changing the user's PowerShell policy.
+administrator access. The repository uses native `.cmd` entrypoints, so Windows
+PowerShell execution policy and script signatures are not involved.
 
 ## Shortcut capture
 
@@ -125,7 +125,7 @@ Run the complete offline quality gate after the runtime and Cargo dependencies
 have been downloaded:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\audit-windows.ps1
+.\scripts\windows\audit-windows.cmd
 ```
 
 It checks formatting, locked offline metadata, Clippy with warnings denied,
@@ -134,7 +134,7 @@ unit tests, and the release build.
 ## Package
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\windows\package-windows.ps1
+.\scripts\windows\package-windows.cmd
 ```
 
 The distributable archive is written to

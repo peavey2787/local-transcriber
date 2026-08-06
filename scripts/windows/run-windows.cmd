@@ -1,12 +1,35 @@
 @echo off
-setlocal
-echo Starting Local Transcriber for Windows...
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0run-windows.ps1" %*
-set "EXIT_CODE=%ERRORLEVEL%"
-if not "%EXIT_CODE%"=="0" (
+setlocal EnableExtensions EnableDelayedExpansion
+
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
+set "BINARY=%RELEASE_DIRECTORY%\local-stt-rs.exe"
+
+if not exist "%BINARY%" (
+    echo ERROR: The release binary is missing.
+    echo Run scripts\windows\build-windows.cmd first.
+    set "RC=1"
+    goto :fail
+)
+for %%F in (sherpa-onnx-c-api.dll onnxruntime.dll) do (
+    if not exist "%RELEASE_DIRECTORY%\%%F" (
+        echo ERROR: %%F is missing beside the release binary. Rebuild the application.
+        set "RC=1"
+        goto :fail
+    )
+)
+
+"%BINARY%" %*
+set "RC=!ERRORLEVEL!"
+if not "!RC!"=="0" goto :fail
+exit /b 0
+
+:fail
+if not defined RC set "RC=1"
+if not defined LT_NO_PAUSE (
     echo.
-    echo Windows launcher failed with exit code %EXIT_CODE%.
+    echo Windows application exited with code !RC!.
     echo Review the error above, then press any key to close this window.
     pause >nul
 )
-exit /b %EXIT_CODE%
+exit /b !RC!

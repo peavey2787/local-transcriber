@@ -1,3 +1,3 @@
-//! Shared settings form re-exported for the Windows application.
+//! Shared settings-change type used by the Windows application.
 
-pub(super) use transcriber_ui::settings_state::{SettingsChanges, SettingsForm as SettingsState};
+pub(super) use transcriber_ui::settings_state::SettingsChanges;

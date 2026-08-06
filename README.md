@@ -69,8 +69,8 @@ session notes, auditing, and packaging.
 From PowerShell:
 
 ```powershell
-.\scripts\windows\build-windows.ps1
-.\scripts\windows\run-windows.ps1
+.\scripts\windows\build-windows.cmd
+.\scripts\windows\run-windows.cmd
 ```
 
 See [`apps/windows/README.md`](apps/windows/README.md) for Windows requirements,
@@ -87,7 +87,7 @@ Linux:
 Windows:
 
 ```powershell
-.\scripts\windows\audit-windows.ps1
+.\scripts\windows\audit-windows.cmd
 ```
 
 Both gates format the entire workspace and run Clippy, tests, and a release build

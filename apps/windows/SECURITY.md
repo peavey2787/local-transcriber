@@ -29,7 +29,7 @@ The native Sherpa/ONNX archive is pinned to:
 - Asset: `sherpa-onnx-v1.13.4-win-x64-shared-MT-Release-lib.tar.bz2`
 - SHA-256: `f923e5eacb6bca83914d89cb31afa579e11eeaff9af39f8ead82ad19f44b2c9f`
 
-`scripts\windows\prepare-sherpa-runtime.ps1` rejects any archive whose digest differs
+`scripts\windows\prepare-sherpa-runtime.cmd` rejects any archive whose digest differs
 before extraction. Build, audit, and package scripts supply the verified
 project-local runtime through `SHERPA_ONNX_LIB_DIR`, preventing the dependency
 build from choosing or downloading another native archive.

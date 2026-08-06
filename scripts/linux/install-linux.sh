@@ -115,7 +115,7 @@ cleanup_lock_validation() {
 trap cleanup_lock_validation EXIT
 
 cp -- Cargo.lock "$lock_backup"
-"$ROOT_DIR/scripts/linux/cargo-lock-inventory.py" Cargo.lock >"$inventory_before"
+python3 "$ROOT_DIR/scripts/linux/cargo-lock-inventory.py" Cargo.lock >"$inventory_before"
 
 # Prefer a fully offline normalization when all sources are already cached.
 # A first installation may need Cargo to fetch the pinned Git source and crate
@@ -125,7 +125,7 @@ if ! cargo metadata --offline --format-version 1 >/dev/null 2>&1; then
   cargo metadata --format-version 1 >/dev/null
 fi
 
-"$ROOT_DIR/scripts/linux/cargo-lock-inventory.py" Cargo.lock >"$inventory_after"
+python3 "$ROOT_DIR/scripts/linux/cargo-lock-inventory.py" Cargo.lock >"$inventory_after"
 if ! cmp -s "$inventory_before" "$inventory_after"; then
   cp -- "$lock_backup" Cargo.lock
   echo "ERROR: Cargo attempted to change the locked package inventory." >&2

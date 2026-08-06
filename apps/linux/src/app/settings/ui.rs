@@ -54,10 +54,10 @@ impl LocalSttApp {
                 Some(CaptureOutcome::Captured(shortcut)) => {
                     self.settings.hotkey = shortcut;
                     self.settings.capturing_hotkey = false;
+                    let hotkey_name = friendly_name(&self.settings.hotkey);
                     self.settings.set_message(
                         format!(
-                            "Captured {}. Activating and saving automatically…",
-                            friendly_name(&self.settings.hotkey)
+                            "Captured {hotkey_name}. Activating and saving automatically…"
                         ),
                         true,
                     );

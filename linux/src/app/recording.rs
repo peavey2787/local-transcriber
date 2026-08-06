@@ -14,7 +14,14 @@ use super::transcription::{QueueError, TranscriptionEvent};
 const LIVE_CHUNK_SECS: u32 = 10;
 const LIVE_CHUNK_SAMPLES: usize = (SAMPLE_RATE as usize) * (LIVE_CHUNK_SECS as usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecordingPurpose {
+    Transcription,
+    VoiceCommand,
+}
+
 pub(super) struct LiveSession {
+    purpose: RecordingPurpose,
     next_id: usize,
     in_flight: usize,
     done: BTreeMap<usize, Result<String, String>>,
@@ -23,8 +30,9 @@ pub(super) struct LiveSession {
 }
 
 impl LiveSession {
-    fn new() -> Self {
+    fn new(purpose: RecordingPurpose) -> Self {
         Self {
+            purpose,
             next_id: 0,
             in_flight: 0,
             done: BTreeMap::new(),
@@ -65,6 +73,14 @@ impl LiveSession {
 }
 
 impl LocalSttApp {
+    pub(super) fn recording_pipeline_busy(&self) -> bool {
+        self.recording
+            || self
+                .session
+                .as_ref()
+                .is_some_and(|session| session.finishing)
+    }
+
     fn spawn_chunk(&mut self, id: usize, audio: Vec<f32>) {
         if let Some(session) = self.session.as_mut() {
             session.in_flight += 1;
@@ -97,17 +113,33 @@ impl LocalSttApp {
             let Some(chunk) = self.recorder.take_prefix(LIVE_CHUNK_SAMPLES) else {
                 break;
             };
-            let id = {
-                let session = self.session.get_or_insert_with(LiveSession::new);
-                let id = session.next_id;
-                session.next_id += 1;
-                id
+            let Some(session) = self.session.as_mut() else {
+                break;
             };
+            let id = session.next_id;
+            session.next_id += 1;
             self.spawn_chunk(id, chunk);
         }
     }
 
     pub(super) fn toggle_record(&mut self) {
+        self.toggle_recording_purpose(RecordingPurpose::Transcription);
+    }
+
+    pub(super) fn toggle_voice_command(&mut self) {
+        if !self.config.voice_commands_enabled
+            || !self.hotkeys.is_voice_commands_bound()
+            || self.voice_commands.running
+        {
+            return;
+        }
+        self.toggle_recording_purpose(RecordingPurpose::VoiceCommand);
+    }
+
+    fn toggle_recording_purpose(&mut self, purpose: RecordingPurpose) {
+        if self.voice_commands.running {
+            return;
+        }
         if self.engine.is_none() {
             self.show_engine_loading_state();
             return;
@@ -117,9 +149,11 @@ impl LocalSttApp {
         }
 
         if self.recording {
-            self.stop_recording();
+            if self.session.as_ref().is_some_and(|session| session.purpose == purpose) {
+                self.stop_recording();
+            }
         } else {
-            self.start_recording();
+            self.start_recording(purpose);
         }
     }
 
@@ -131,23 +165,31 @@ impl LocalSttApp {
         }
     }
 
-    fn start_recording(&mut self) {
+    fn start_recording(&mut self, purpose: RecordingPurpose) {
         if let Err(error) = self.recorder.start() {
             self.handle_microphone_start_error(error);
             return;
         }
 
-        self.paste_target = self.config.auto_paste.then(PasteTarget::capture);
+        self.paste_target = (purpose == RecordingPurpose::Transcription
+            && self.config.auto_paste)
+            .then(PasteTarget::capture);
         self.recording = true;
-        self.session = Some(LiveSession::new());
+        self.session = Some(LiveSession::new(purpose));
         if self.config.show_recording_notifications {
-            self.overlay.show_listening();
+            match purpose {
+                RecordingPurpose::Transcription => self.overlay.show_listening(),
+                RecordingPurpose::VoiceCommand => self.overlay.show_command_listening(),
+            }
         } else {
             self.overlay.dismiss();
         }
         self.tray.set_status(TrayStatus::Recording);
-        self.tray.set_tooltip("local-stt — recording…");
-        println!("[local-stt] recording (live {LIVE_CHUNK_SECS}s chunks)");
+        self.tray.set_tooltip(match purpose {
+            RecordingPurpose::Transcription => "local-stt — recording…",
+            RecordingPurpose::VoiceCommand => "local-stt — recording voice command…",
+        });
+        println!("[local-stt] recording {purpose:?} (live {LIVE_CHUNK_SECS}s chunks)");
     }
 
     fn handle_microphone_start_error(&mut self, error: anyhow::Error) {
@@ -170,13 +212,24 @@ impl LocalSttApp {
         let tail = self.recorder.stop();
         let (id, expected) = self.finish_session_schedule();
 
+        let purpose = self
+            .session
+            .as_ref()
+            .map(|session| session.purpose)
+            .unwrap_or(RecordingPurpose::Transcription);
         if self.config.show_transcribing_notifications {
-            self.overlay.show_processing();
+            match purpose {
+                RecordingPurpose::Transcription => self.overlay.show_processing(),
+                RecordingPurpose::VoiceCommand => self.overlay.show_command_processing(),
+            }
         } else {
             self.overlay.dismiss();
         }
         self.tray.set_status(TrayStatus::Busy);
-        self.tray.set_tooltip("local-stt — transcribing…");
+        self.tray.set_tooltip(match purpose {
+            RecordingPurpose::Transcription => "local-stt — transcribing…",
+            RecordingPurpose::VoiceCommand => "local-stt — recognizing voice command…",
+        });
         println!("[local-stt] stopped — expecting {expected} chunks");
 
         if tail.len() >= (SAMPLE_RATE as usize) * 3 / 10 {
@@ -188,7 +241,9 @@ impl LocalSttApp {
     }
 
     fn finish_session_schedule(&mut self) -> (usize, usize) {
-        let session = self.session.get_or_insert_with(LiveSession::new);
+        let session = self
+            .session
+            .get_or_insert_with(|| LiveSession::new(RecordingPurpose::Transcription));
         let id = session.next_id;
         session.next_id += 1;
         session.finishing = true;
@@ -205,17 +260,48 @@ impl LocalSttApp {
             return;
         }
 
+        let purpose = session.purpose;
         let text = session.joined();
         let errors = session.errors();
-        if errors.is_empty() {
-            self.present_transcription(text);
-        } else {
-            self.present_transcription_failure(text, errors);
-        }
-        self.tray.set_status(TrayStatus::Idle);
-        self.tray.set_tooltip("local-stt — Parakeet ready");
         self.session = None;
         self.paste_target = None;
+
+        match purpose {
+            RecordingPurpose::Transcription if errors.is_empty() => {
+                self.present_transcription(text);
+                self.tray.set_status(TrayStatus::Idle);
+                self.tray.set_tooltip("local-stt — Parakeet ready");
+            }
+            RecordingPurpose::Transcription => {
+                self.present_transcription_failure(text, errors);
+                self.tray.set_status(TrayStatus::Idle);
+                self.tray.set_tooltip("local-stt — Parakeet ready");
+            }
+            RecordingPurpose::VoiceCommand if errors.is_empty() => {
+                self.dispatch_voice_command(text);
+            }
+            RecordingPurpose::VoiceCommand => {
+                self.tray.set_status(TrayStatus::Idle);
+                self.tray.set_tooltip("local-stt — Parakeet ready");
+                let summary = format!(
+                    "Voice-command recognition failed for {} audio chunk(s)",
+                    errors.len()
+                );
+                for error in errors {
+                    log::error!("{error}");
+                }
+                if self.config.show_result_notifications {
+                    self.overlay.show_notice(
+                        summary,
+                        false,
+                        self.now(),
+                        self.config.notification_seconds(),
+                    );
+                } else {
+                    self.overlay.dismiss();
+                }
+            }
+        }
     }
 
     pub(super) fn poll_workers(&mut self) {
@@ -240,6 +326,7 @@ impl LocalSttApp {
         self.tray.set_tooltip(&format!("local-stt — {message}"));
         if self.config.show_loading_notifications
             && !self.settings.open
+            && !self.voice_commands.open
             && self.hotkey_problem.is_none()
         {
             self.overlay.show_loading(message);
@@ -254,7 +341,7 @@ impl LocalSttApp {
         self.tray
             .set_tooltip(&format!("local-stt — {}", engine.label()));
         self.engine = Some(engine);
-        if self.settings.open {
+        if self.settings.open || self.voice_commands.open {
             return;
         }
 
@@ -284,7 +371,10 @@ impl LocalSttApp {
         self.startup_status = format!("Model load failed: {error}");
         self.tray.set_status(TrayStatus::Idle);
         self.tray.set_tooltip("local-stt — model load failed");
-        if self.config.show_loading_notifications && !self.settings.open {
+        if self.config.show_loading_notifications
+            && !self.settings.open
+            && !self.voice_commands.open
+        {
             self.overlay
                 .show_notice(
                     self.startup_status.clone(),
@@ -312,7 +402,7 @@ mod tests {
 
     #[test]
     fn session_preserves_chunk_order_and_reports_errors() {
-        let mut session = LiveSession::new();
+        let mut session = LiveSession::new(RecordingPurpose::Transcription);
         session.done.insert(2, Ok("third".into()));
         session.done.insert(0, Ok("first".into()));
         session.done.insert(1, Err("decoder failed".into()));
@@ -326,7 +416,7 @@ mod tests {
 
     #[test]
     fn session_is_complete_only_after_expected_work_finishes() {
-        let mut session = LiveSession::new();
+        let mut session = LiveSession::new(RecordingPurpose::Transcription);
         session.finishing = true;
         session.expected = Some(2);
         session.in_flight = 1;

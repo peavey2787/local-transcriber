@@ -21,7 +21,9 @@ pub enum OverlayState {
         message: String,
     },
     Listening,
+    CommandListening,
     Processing,
+    CommandProcessing,
     Notice {
         message: String,
         ok: bool,
@@ -72,8 +74,18 @@ impl Overlay {
         self.dismiss_at = None;
     }
 
+    pub fn show_command_listening(&mut self) {
+        self.state = OverlayState::CommandListening;
+        self.dismiss_at = None;
+    }
+
     pub fn show_processing(&mut self) {
         self.state = OverlayState::Processing;
+        self.dismiss_at = None;
+    }
+
+    pub fn show_command_processing(&mut self) {
+        self.state = OverlayState::CommandProcessing;
         self.dismiss_at = None;
     }
 
@@ -189,7 +201,12 @@ impl Overlay {
             OverlayState::Hidden => (String::new(), SUBTEXT),
             OverlayState::Loading { message } => (message.clone(), ACCENT),
             OverlayState::Listening => ("Recording — press the hotkey again to stop".into(), RED),
+            OverlayState::CommandListening => (
+                "Voice command — press the command hotkey again to stop".into(),
+                RED,
+            ),
             OverlayState::Processing => ("Transcribing…".into(), ACCENT),
+            OverlayState::CommandProcessing => ("Recognizing voice command…".into(), ACCENT),
             OverlayState::Notice { message, ok } => {
                 (message.clone(), if *ok { GREEN } else { RED })
             }
@@ -299,11 +316,13 @@ impl Overlay {
         let rms = (self.rms * 6.0).clamp(0.0, 1.0);
         for i in 0..7 {
             let t = match &self.state {
-                OverlayState::Listening => {
+                OverlayState::Listening | OverlayState::CommandListening => {
                     let jitter = ((self.phase + i as f32) * 3.1).sin() * 0.04;
                     (rms + (i as f32 - 3.0) * 0.06 + jitter).clamp(0.0, 1.0)
                 }
-                OverlayState::Loading { .. } | OverlayState::Processing => {
+                OverlayState::Loading { .. }
+                | OverlayState::Processing
+                | OverlayState::CommandProcessing => {
                     ((self.phase + i as f32 * 0.8).sin() * 0.5 + 0.5).clamp(0.0, 1.0)
                 }
                 _ => 0.15,

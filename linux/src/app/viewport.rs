@@ -15,7 +15,7 @@ impl LocalSttApp {
             .input(|i| i.viewport().monitor_size)
             .unwrap_or(egui::vec2(1920.0, 1080.0));
 
-        if self.settings.open {
+        if self.settings.open || self.voice_commands.open {
             let width = SETTINGS_W.min((monitor.x - 24.0).max(360.0));
             let height = SETTINGS_H.min((monitor.y - 40.0).max(420.0));
             let x = ((monitor.x - width) * 0.5).max(0.0);
@@ -24,7 +24,12 @@ impl LocalSttApp {
             ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(x, y)));
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(width, height)));
             ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-            if self.settings.focus_pending {
+            if self.voice_commands.open && self.voice_commands.focus_pending {
+                ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                ctx.send_viewport_cmd(ViewportCommand::Focus);
+                self.voice_commands.focus_pending = false;
+            } else if self.settings.focus_pending {
+                ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(ViewportCommand::Focus);
                 self.settings.focus_pending = false;
             }

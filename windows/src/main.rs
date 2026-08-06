@@ -15,6 +15,7 @@ mod overlay;
 mod platform;
 mod sha256;
 mod tray;
+mod voice_commands;
 mod ui_wake;
 mod util;
 

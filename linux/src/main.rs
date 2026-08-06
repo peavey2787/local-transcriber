@@ -11,6 +11,7 @@ mod overlay;
 mod paste;
 mod sha256;
 mod tray;
+mod voice_commands;
 mod util;
 
 use anyhow::{Context, Result};

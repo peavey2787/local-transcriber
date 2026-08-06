@@ -2,7 +2,7 @@
 
 use crate::audio::Recorder;
 use crate::config;
-use crate::hotkey::{friendly_name, validate};
+use crate::hotkey::{friendly_name, same_shortcut, validate};
 use crate::overlay::OverlayState;
 
 use super::super::controller::LocalSttApp;
@@ -10,10 +10,25 @@ use super::state::SettingsChanges;
 
 impl LocalSttApp {
     pub(in crate::app) fn open_settings(&mut self) {
+        if self.voice_commands.running {
+            if self.config.show_result_notifications {
+                self.overlay.show_notice(
+                    "Finish the current voice command before opening Settings",
+                    false,
+                    self.now(),
+                    self.config.notification_seconds(),
+                );
+            }
+            return;
+        }
+
         // Settings owns the root window while it is open. Entering Settings
         // immediately cancels recording/transcription presentation and removes
         // every notification so the two modes can never overlap.
-        self.cancel_recording_for_settings();
+        self.voice_commands.open = false;
+        self.voice_commands.focus_pending = false;
+        self.voice_commands.capturing_hotkey = false;
+        self.cancel_recording_for_editor();
         let became_visible = self.settings_window.show();
         if became_visible {
             self.settings.capturing_hotkey = false;
@@ -161,18 +176,19 @@ impl LocalSttApp {
             return Err(error.to_string());
         }
 
+        if self.config.voice_commands_enabled
+            && same_shortcut(&requested, &self.config.voice_commands_hotkey)
+        {
+            self.settings.hotkey.clone_from(&self.config.hotkey);
+            return Err(
+                "The recording hotkey must differ from the voice-command hotkey.".to_string(),
+            );
+        }
+
         if let Err(error) = self.hotkeys.rebind(&requested) {
-            self.hotkeys.disable();
-            self.config.hotkey.clear();
-            self.hotkey_problem = Some(format!(
-                "The recording shortcut {} is already in use by another application or unavailable on this desktop.",
-                friendly_name(&requested)
-            ));
-            self.tray.set_hotkey_hint("");
-            self.tray
-                .set_tooltip("local-stt — recording shortcut required; open Settings");
+            self.settings.hotkey.clone_from(&self.config.hotkey);
             return Err(format!(
-                "{error}. The recording shortcut has been disabled. Choose another shortcut."
+                "{error}. The existing recording shortcut remains active; choose another shortcut."
             ));
         }
 
@@ -192,8 +208,12 @@ impl LocalSttApp {
         let allowed = match &self.overlay.state {
             OverlayState::Hidden => true,
             OverlayState::Loading { .. } => self.config.show_loading_notifications,
-            OverlayState::Listening => self.config.show_recording_notifications,
-            OverlayState::Processing => self.config.show_transcribing_notifications,
+            OverlayState::Listening | OverlayState::CommandListening => {
+                self.config.show_recording_notifications
+            }
+            OverlayState::Processing | OverlayState::CommandProcessing => {
+                self.config.show_transcribing_notifications
+            }
             OverlayState::Result { .. } => self.config.show_result_notifications,
             OverlayState::Notice { .. } => {
                 self.hotkey_problem.is_some()

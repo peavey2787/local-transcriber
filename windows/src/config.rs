@@ -11,6 +11,13 @@ pub(crate) const MIN_NOTIFICATION_SECONDS: u32 = 1;
 pub(crate) const MAX_NOTIFICATION_SECONDS: u32 = 60;
 const DEFAULT_NOTIFICATION_SECONDS: u32 = 6;
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct VoiceCommand {
+    pub(crate) phrase: String,
+    #[serde(default)]
+    pub(crate) scripts: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Config {
     /// Global shortcut syntax accepted by global-hotkey. This value is produced
@@ -29,6 +36,15 @@ pub(crate) struct Config {
     /// Press Enter after a successful automatic paste.
     #[serde(default)]
     pub(crate) press_enter_after_paste: bool,
+    /// Enable a second recording mode that maps spoken phrases to scripts.
+    #[serde(default)]
+    pub(crate) voice_commands_enabled: bool,
+    /// Global shortcut for voice-command recording. Must differ from `hotkey`.
+    #[serde(default)]
+    pub(crate) voice_commands_hotkey: String,
+    /// Exact phrase-to-script-chain mappings.
+    #[serde(default)]
+    pub(crate) voice_commands: Vec<VoiceCommand>,
     /// Seconds before temporary notices and untouched results close.
     #[serde(default = "default_notification_seconds")]
     pub(crate) notification_duration_seconds: u32,
@@ -67,6 +83,9 @@ impl Default for Config {
             auto_paste: false,
             append_trailing_space: false,
             press_enter_after_paste: false,
+            voice_commands_enabled: false,
+            voice_commands_hotkey: String::new(),
+            voice_commands: Vec::new(),
             notification_duration_seconds: default_notification_seconds(),
             show_loading_notifications: true,
             show_recording_notifications: true,
@@ -187,6 +206,25 @@ mod tests {
     }
 
     #[test]
+    fn voice_commands_round_trip() {
+        let config = Config {
+            voice_commands_enabled: true,
+            voice_commands_hotkey: "control+shift+KeyV".to_string(),
+            voice_commands: vec![VoiceCommand {
+                phrase: "Open reports".to_string(),
+                scripts: vec![r"C:\scripts\report.ps1".to_string()],
+            }],
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        let decoded: Config = serde_json::from_str(&json).unwrap();
+        assert!(decoded.voice_commands_enabled);
+        assert_eq!(decoded.voice_commands_hotkey, config.voice_commands_hotkey);
+        assert_eq!(decoded.voice_commands, config.voice_commands);
+    }
+
+    #[test]
     fn current_config_has_no_retired_fields() {
         let json = serde_json::to_string(&Config::default()).unwrap();
         assert!(!json.contains("show_notifications"));
@@ -194,5 +232,8 @@ mod tests {
         assert!(json.contains("notification_duration_seconds"));
         assert!(json.contains("append_trailing_space"));
         assert!(json.contains("press_enter_after_paste"));
+        assert!(json.contains("voice_commands_enabled"));
+        assert!(json.contains("voice_commands_hotkey"));
+        assert!(json.contains("voice_commands"));
     }
 }

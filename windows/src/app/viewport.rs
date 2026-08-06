@@ -25,6 +25,7 @@ enum RootViewportMode {
     Control,
     Notification,
     Settings,
+    VoiceCommands,
 }
 
 #[derive(Debug, Default)]
@@ -54,8 +55,14 @@ impl RootViewportState {
 }
 
 impl RootViewportMode {
-    fn from_state(settings_visible: bool, notification_visible: bool) -> Self {
-        if settings_visible {
+    fn from_state(
+        settings_visible: bool,
+        voice_commands_visible: bool,
+        notification_visible: bool,
+    ) -> Self {
+        if voice_commands_visible {
+            Self::VoiceCommands
+        } else if settings_visible {
             Self::Settings
         } else if notification_visible {
             Self::Notification
@@ -69,6 +76,7 @@ impl LocalSttApp {
     pub(super) fn sync_root_viewport(&mut self, ctx: &egui::Context) {
         let mode = RootViewportMode::from_state(
             self.settings_window.is_visible(),
+            self.voice_commands.open,
             self.overlay.is_visible(),
         );
         let mode_changed = self.viewport.mode_changed(mode);
@@ -89,11 +97,21 @@ impl LocalSttApp {
             }
             RootViewportMode::Settings => {
                 if mode_changed {
-                    configure_settings_viewport(ctx);
+                    configure_editor_viewport("local-stt settings", ctx);
                 }
                 if self.settings_window.take_focus_request() {
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+            }
+            RootViewportMode::VoiceCommands => {
+                if mode_changed {
+                    configure_editor_viewport("local-stt voice commands", ctx);
+                }
+                if self.voice_commands.focus_pending {
+                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                    self.voice_commands.focus_pending = false;
                 }
             }
             RootViewportMode::Control => {}
@@ -129,10 +147,10 @@ fn keep_notification_visible(ctx: &egui::Context) {
     ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
 }
 
-fn configure_settings_viewport(ctx: &egui::Context) {
+fn configure_editor_viewport(title: &str, ctx: &egui::Context) {
     let (position, size) = settings_viewport_geometry(display_size());
     apply_borderless_window_policy(ctx, egui::WindowLevel::AlwaysOnTop);
-    ctx.send_viewport_cmd(ViewportCommand::Title("local-stt settings".to_string()));
+    ctx.send_viewport_cmd(ViewportCommand::Title(title.to_string()));
     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
     ctx.send_viewport_cmd(ViewportCommand::InnerSize(size));
     ctx.send_viewport_cmd(ViewportCommand::OuterPosition(position));
@@ -181,16 +199,20 @@ mod tests {
     #[test]
     fn settings_and_notifications_are_mutually_exclusive() {
         assert_eq!(
-            RootViewportMode::from_state(true, true),
+            RootViewportMode::from_state(true, false, true),
             RootViewportMode::Settings
         );
         assert_eq!(
-            RootViewportMode::from_state(false, true),
+            RootViewportMode::from_state(false, false, true),
             RootViewportMode::Notification
         );
         assert_eq!(
-            RootViewportMode::from_state(false, false),
+            RootViewportMode::from_state(false, false, false),
             RootViewportMode::Control
+        );
+        assert_eq!(
+            RootViewportMode::from_state(true, true, true),
+            RootViewportMode::VoiceCommands
         );
     }
 

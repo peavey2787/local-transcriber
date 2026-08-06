@@ -1,5 +1,4 @@
-//! Configurable global shortcut support for Linux X11 and supported Wayland
-//! desktops, plus live shortcut capture for the Settings window.
+//! Configurable global shortcuts for recording and voice-command capture.
 
 use anyhow::{Context as AnyhowContext, Result};
 use crossbeam_channel::{unbounded, Receiver, Sender};
@@ -13,19 +12,25 @@ use std::sync::OnceLock;
 /// Shared handle so hotkey events can wake the egui event loop.
 pub type UiWake = Arc<Mutex<Option<EguiContext>>>;
 
-static HOTKEY_TX: OnceLock<Sender<()>> = OnceLock::new();
+static HOTKEY_TX: OnceLock<Sender<u32>> = OnceLock::new();
 static UI_WAKE: OnceLock<UiWake> = OnceLock::new();
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HotkeyPresses {
+    pub recording: bool,
+    pub voice_command: bool,
+}
 
 pub struct Hotkeys {
     manager: GlobalHotKeyManager,
-    registered: Option<HotKey>,
-    rx: Receiver<()>,
+    recording: Option<HotKey>,
+    voice_command: Option<HotKey>,
+    rx: Receiver<u32>,
 }
 
 impl Hotkeys {
-    /// Creates the global-hotkey manager without making a shortcut conflict
-    /// fatal to the whole application. The returned warning means the app is
-    /// running with no recording shortcut until the user chooses another one.
+    /// Creates the global-hotkey manager without making a recording shortcut
+    /// conflict fatal to the whole application.
     pub fn register(wake: UiWake, shortcut: &str) -> Result<(Self, Option<String>)> {
         let (tx, rx) = unbounded();
         let _ = HOTKEY_TX.set(tx);
@@ -36,7 +41,7 @@ impl Hotkeys {
                 return;
             }
             if let Some(tx) = HOTKEY_TX.get() {
-                let _ = tx.send(());
+                let _ = tx.send(event.id);
             }
             if let Some(wake) = UI_WAKE.get() {
                 if let Some(ctx) = wake.lock().as_ref() {
@@ -48,10 +53,10 @@ impl Hotkeys {
         let manager = GlobalHotKeyManager::new().context(
             "create global hotkey manager (on Linux, verify an X11 session or a desktop with the XDG GlobalShortcuts portal)",
         )?;
-
         let mut this = Self {
             manager,
-            registered: None,
+            recording: None,
+            voice_command: None,
             rx,
         };
 
@@ -63,7 +68,7 @@ impl Hotkeys {
         let warning = match parse(trimmed) {
             Ok(requested) => match this.manager.register(requested) {
                 Ok(()) => {
-                    this.registered = Some(requested);
+                    this.recording = Some(requested);
                     println!("[local-stt] hotkey registered: {}", friendly_name(trimmed));
                     None
                 }
@@ -81,61 +86,106 @@ impl Hotkeys {
         Ok((this, warning))
     }
 
-    /// Replaces the active shortcut. If registration fails, the previous
-    /// shortcut stays dropped so the app never reports a key as active when it
-    /// is not actually owned.
     pub fn rebind(&mut self, shortcut: &str) -> Result<()> {
         let replacement = parse(shortcut)?;
-        if self.registered == Some(replacement) {
+        if self.recording == Some(replacement) {
             return Ok(());
         }
-
-        if let Some(previous) = self.registered {
-            self.manager
-                .unregister(previous)
-                .context("unregister previous hotkey")?;
-            self.registered = None;
+        if self.voice_command == Some(replacement) {
+            anyhow::bail!("the recording and voice-command hotkeys must be different");
         }
+        self.replace_recording(replacement, shortcut)
+    }
 
-        if let Err(error) = self.manager.register(replacement) {
-            anyhow::bail!(
-                "could not register {shortcut:?}; the recording hotkey is now disabled: {error}"
-            );
+    fn replace_recording(&mut self, replacement: HotKey, shortcut: &str) -> Result<()> {
+        self.manager
+            .register(replacement)
+            .with_context(|| format!("could not register {shortcut:?}"))?;
+        if let Some(previous) = self.recording.take() {
+            if let Err(error) = self.manager.unregister(previous) {
+                let _ = self.manager.unregister(replacement);
+                self.recording = Some(previous);
+                return Err(error).context("unregister previous recording hotkey");
+            }
         }
-
-        self.registered = Some(replacement);
-        println!("[local-stt] hotkey changed to: {}", friendly_name(shortcut));
+        self.recording = Some(replacement);
+        println!("[local-stt] recording hotkey changed to: {}", friendly_name(shortcut));
         Ok(())
     }
 
-    /// Disables shortcut handling even if the desktop refuses to release the
-    /// underlying registration. This keeps stale events from toggling audio.
-    pub fn disable(&mut self) {
-        if let Some(previous) = self.registered.take() {
+    pub fn configure_voice_commands(&mut self, enabled: bool, shortcut: &str) -> Result<()> {
+        if !enabled {
+            self.disable_voice_commands();
+            return Ok(());
+        }
+        let replacement = parse(shortcut)?;
+        if self.recording == Some(replacement) {
+            anyhow::bail!("the voice-command hotkey must differ from the recording hotkey");
+        }
+        if self.voice_command == Some(replacement) {
+            return Ok(());
+        }
+
+        self.manager
+            .register(replacement)
+            .with_context(|| format!("could not register voice-command hotkey {shortcut:?}"))?;
+        if let Some(previous) = self.voice_command.take() {
             if let Err(error) = self.manager.unregister(previous) {
-                eprintln!("[local-stt] could not release disabled hotkey: {error}");
+                let _ = self.manager.unregister(replacement);
+                self.voice_command = Some(previous);
+                return Err(error).context("unregister previous voice-command hotkey");
             }
         }
-        while self.rx.try_recv().is_ok() {}
+        self.voice_command = Some(replacement);
+        println!("[local-stt] voice-command hotkey: {}", friendly_name(shortcut));
+        Ok(())
+    }
+
+    pub fn disable_voice_commands(&mut self) {
+        if let Some(previous) = self.voice_command.take() {
+            if let Err(error) = self.manager.unregister(previous) {
+                eprintln!("[local-stt] could not release disabled voice-command hotkey: {error}");
+            }
+        }
+        self.drain_events();
     }
 
     pub fn is_bound(&self) -> bool {
-        self.registered.is_some()
+        self.recording.is_some()
     }
 
-    /// Returns true if the toggle hotkey was pressed since the previous poll.
-    pub fn poll_toggle(&self) -> bool {
-        let mut hit = false;
-        while self.rx.try_recv().is_ok() {
-            hit = true;
+    pub fn is_voice_commands_bound(&self) -> bool {
+        self.voice_command.is_some()
+    }
+
+    pub fn poll(&self) -> HotkeyPresses {
+        let mut presses = HotkeyPresses::default();
+        while let Ok(id) = self.rx.try_recv() {
+            if self.recording.is_some_and(|hotkey| hotkey.id() == id) {
+                presses.recording = true;
+            }
+            if self.voice_command.is_some_and(|hotkey| hotkey.id() == id) {
+                presses.voice_command = true;
+            }
         }
-        hit
+        presses
+    }
+
+    fn drain_events(&self) {
+        while self.rx.try_recv().is_ok() {}
     }
 }
 
 pub fn validate(shortcut: &str) -> Result<()> {
     let _ = parse(shortcut)?;
     Ok(())
+}
+
+pub fn same_shortcut(left: &str, right: &str) -> bool {
+    match (parse(left), parse(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left.trim().eq_ignore_ascii_case(right.trim()),
+    }
 }
 
 fn parse(shortcut: &str) -> Result<HotKey> {
@@ -284,6 +334,12 @@ mod tests {
     #[test]
     fn modified_key_parses() {
         validate("control+shift+Space").unwrap();
+    }
+
+    #[test]
+    fn shortcut_identity_detects_collisions() {
+        assert!(same_shortcut("control+shift+KeyR", "control+shift+KeyR"));
+        assert!(!same_shortcut("control+shift+KeyR", "control+shift+KeyT"));
     }
 
     #[test]

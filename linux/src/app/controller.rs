@@ -9,11 +9,13 @@ use std::time::Instant;
 use crate::asr::AsrEngine;
 use crate::audio::Recorder;
 use crate::config::{self, Config};
-use crate::hotkey::{Hotkeys, UiWake};
+use crate::hotkey::{same_shortcut, Hotkeys, UiWake};
 use crate::overlay::{Overlay, OverlayAction, OverlayState};
 use crate::paste::PasteTarget;
 use crate::tray::{Tray, TrayAction};
+use crate::voice_commands::validate_command_list;
 
+use super::commands::VoiceCommandsState;
 use super::recording::LiveSession;
 use super::settings::SettingsState;
 use super::theme;
@@ -36,7 +38,9 @@ pub struct LocalSttApp {
     pub(super) startup_status: String,
     pub(super) paste_target: Option<PasteTarget>,
     pub(super) settings: SettingsState,
+    pub(super) voice_commands: VoiceCommandsState,
     pub(super) hotkey_problem: Option<String>,
+    pub(super) voice_command_problem: Option<String>,
 }
 
 impl LocalSttApp {
@@ -45,7 +49,7 @@ impl LocalSttApp {
 
         let ui_wake: UiWake = Arc::new(Mutex::new(None));
         let requested_hotkey = config.hotkey.clone();
-        let (hotkeys, registration_warning) =
+        let (mut hotkeys, registration_warning) =
             Hotkeys::register(ui_wake.clone(), &requested_hotkey)?;
         let hotkey_problem = registration_warning.or_else(|| {
             requested_hotkey.trim().is_empty().then(|| {
@@ -58,7 +62,29 @@ impl LocalSttApp {
                 eprintln!("[local-stt] could not save the disabled hotkey state: {error:#}");
             }
         }
-        let tray = Tray::new(&config.hotkey)?;
+        let voice_command_problem = if config.voice_commands_enabled {
+            if config.voice_commands_hotkey.trim().is_empty() {
+                Some("Voice commands are enabled, but no voice-command hotkey is set.".to_string())
+            } else if !config.hotkey.trim().is_empty()
+                && same_shortcut(&config.hotkey, &config.voice_commands_hotkey)
+            {
+                Some("The voice-command hotkey matches the recording hotkey.".to_string())
+            } else if let Err(error) = validate_command_list(&config.voice_commands) {
+                Some(format!("The voice-command configuration is invalid: {error:#}"))
+            } else {
+                hotkeys
+                    .configure_voice_commands(true, &config.voice_commands_hotkey)
+                    .err()
+                    .map(|error| format!("The voice-command hotkey is unavailable: {error:#}"))
+            }
+        } else {
+            None
+        };
+        let tray = Tray::new(
+            &config.hotkey,
+            config.voice_commands_enabled && voice_command_problem.is_none(),
+            &config.voice_commands_hotkey,
+        )?;
         let recorder = match Recorder::new(config.recording_device.as_ref()) {
             Ok(recorder) => recorder,
             Err(error) if config.recording_device.is_some() => {
@@ -97,10 +123,12 @@ impl LocalSttApp {
             last_frame: Instant::now(),
             wake_installed: false,
             settings: SettingsState::from_config(&config),
+            voice_commands: VoiceCommandsState::from_config(&config),
             config,
             startup_status,
             paste_target: None,
             hotkey_problem,
+            voice_command_problem,
         })
     }
 
@@ -125,17 +153,29 @@ impl LocalSttApp {
     }
 
     fn handle_user_commands(&mut self, ctx: &egui::Context) -> bool {
-        let hotkey_pressed = self.hotkeys.poll_toggle();
-        if self.hotkeys.is_bound() && hotkey_pressed && !self.settings.open {
-            self.toggle_record();
-        }
         match self.tray.poll_action() {
             Some(TrayAction::Settings) => self.open_settings(),
+            Some(TrayAction::VoiceCommands) => self.open_voice_commands(),
             Some(TrayAction::Quit) => {
                 ctx.send_viewport_cmd(ViewportCommand::Close);
                 return true;
             }
             None => {}
+        }
+
+        if self.settings.open || self.voice_commands.open {
+            let _ = self.hotkeys.poll();
+            return false;
+        }
+
+        let presses = self.hotkeys.poll();
+        if self.hotkeys.is_bound() && presses.recording {
+            self.toggle_record();
+        } else if self.config.voice_commands_enabled
+            && self.hotkeys.is_voice_commands_bound()
+            && presses.voice_command
+        {
+            self.toggle_voice_command();
         }
         false
     }
@@ -149,6 +189,8 @@ impl LocalSttApp {
 
     fn request_next_frame(&self, ctx: &egui::Context) {
         let busy = self.settings.open
+            || self.voice_commands.open
+            || self.voice_commands.running
             || self.recording
             || self.overlay.is_visible()
             || self.session.as_ref().is_some_and(|session| session.finishing)
@@ -158,6 +200,10 @@ impl LocalSttApp {
     }
 
     fn render(&mut self, ctx: &egui::Context) {
+        if self.voice_commands.open {
+            self.draw_voice_commands(ctx);
+            return;
+        }
         if self.settings.open {
             self.draw_settings(ctx);
             return;
@@ -194,6 +240,7 @@ impl eframe::App for LocalSttApp {
         let dt = self.last_frame.elapsed().as_secs_f32().min(0.05);
         self.last_frame = Instant::now();
         self.poll_workers();
+        self.poll_voice_command_results();
         self.pump_live_chunks();
         if self.handle_user_commands(ctx) {
             return;

@@ -31,13 +31,16 @@ impl TrayStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrayAction {
     Settings,
+    VoiceCommands,
     Quit,
 }
 
 pub struct Tray {
     icon: TrayIcon,
     hotkey_item: MenuItem,
+    voice_hotkey_item: MenuItem,
     settings_id: muda::MenuId,
+    voice_commands_id: muda::MenuId,
     quit_id: muda::MenuId,
 }
 
@@ -46,6 +49,16 @@ fn hotkey_menu_text(hotkey: &str) -> String {
         "No recording hotkey — open Settings…".into()
     } else {
         format!("{} to record", friendly_name(hotkey))
+    }
+}
+
+fn voice_hotkey_menu_text(enabled: bool, hotkey: &str) -> String {
+    if !enabled {
+        "Voice commands disabled".into()
+    } else if hotkey.trim().is_empty() {
+        "Voice-command hotkey unavailable".into()
+    } else {
+        format!("{} for voice commands", friendly_name(hotkey))
     }
 }
 
@@ -73,9 +86,11 @@ pub(crate) fn install_legacy_backend_warning_filter() -> gtk::glib::LogHandlerId
 }
 
 impl Tray {
-    pub fn new(hotkey: &str) -> Result<Self> {
+    pub fn new(hotkey: &str, voice_enabled: bool, voice_hotkey: &str) -> Result<Self> {
         let settings = MenuItem::new("Settings…", true, None);
         let settings_id = settings.id().clone();
+        let voice_commands = MenuItem::new("Voice Commands…", true, None);
+        let voice_commands_id = voice_commands.id().clone();
         let quit = MenuItem::new("Quit", true, None);
         let quit_id = quit.id().clone();
 
@@ -84,7 +99,14 @@ impl Tray {
         menu.append(&PredefinedMenuItem::separator())?;
         let hotkey_item = MenuItem::new(hotkey_menu_text(hotkey), false, None);
         menu.append(&hotkey_item)?;
+        let voice_hotkey_item = MenuItem::new(
+            voice_hotkey_menu_text(voice_enabled, voice_hotkey),
+            false,
+            None,
+        );
+        menu.append(&voice_hotkey_item)?;
         menu.append(&settings)?;
+        menu.append(&voice_commands)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
 
@@ -98,7 +120,9 @@ impl Tray {
         Ok(Self {
             icon: tray,
             hotkey_item,
+            voice_hotkey_item,
             settings_id,
+            voice_commands_id,
             quit_id,
         })
     }
@@ -122,11 +146,18 @@ impl Tray {
         self.hotkey_item.set_text(hotkey_menu_text(hotkey));
     }
 
+    pub fn set_voice_commands_hint(&self, enabled: bool, hotkey: &str) {
+        self.voice_hotkey_item
+            .set_text(voice_hotkey_menu_text(enabled, hotkey));
+    }
+
     pub fn poll_action(&self) -> Option<TrayAction> {
         let mut action = None;
         while let Ok(event) = MenuEvent::receiver().try_recv() {
             if event.id == self.settings_id {
                 action = Some(TrayAction::Settings);
+            } else if event.id == self.voice_commands_id {
+                action = Some(TrayAction::VoiceCommands);
             } else if event.id == self.quit_id {
                 action = Some(TrayAction::Quit);
             }

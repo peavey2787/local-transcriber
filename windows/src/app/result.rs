@@ -182,7 +182,10 @@ impl LocalSttApp {
 }
 
 fn prepare_transcription_text(mut text: String, append_trailing_space: bool) -> String {
-    if append_trailing_space && !text.is_empty() && !text.chars().last().is_some_and(char::is_whitespace) {
+    if append_trailing_space
+        && !text.is_empty()
+        && !text.chars().last().is_some_and(char::is_whitespace)
+    {
         text.push(' ');
     }
     text

@@ -1,0 +1,20 @@
+[package]
+name = "transcriber-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Platform-independent transcription, audio, model, configuration, and voice-command logic"
+
+[dependencies]
+anyhow.workspace = true
+bzip2.workspace = true
+cpal.workspace = true
+crossbeam-channel.workspace = true
+log.workspace = true
+parking_lot.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sherpa-onnx.workspace = true
+tar.workspace = true

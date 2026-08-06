@@ -1,2 +1,11 @@
-/local-transcriber.zip
 /target/
+/.native/
+/dist/
+/local-transcriber.zip
+*.log
+*.part
+*.profraw
+*.profdata
+core
+core.*
+desktop-before.png

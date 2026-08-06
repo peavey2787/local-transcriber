@@ -1,0 +1,30 @@
+[package]
+name = "local-transcriber-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Linux Local Transcriber application"
+
+[[bin]]
+name = "local-stt-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+cpal.workspace = true
+crossbeam-channel.workspace = true
+dirs.workspace = true
+eframe.workspace = true
+egui.workspace = true
+env_logger.workspace = true
+global-hotkey = { package = "wayclip-global-hotkey", git = "https://github.com/Wayclip/global-hotkey", rev = "aed9bbcfb87682dfdc9d434484026959b8066f40" }
+log.workspace = true
+muda.workspace = true
+parking_lot.workspace = true
+transcriber-core = { path = "../../crates/transcriber-core" }
+transcriber-ui = { path = "../../crates/transcriber-ui" }
+tray-icon.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

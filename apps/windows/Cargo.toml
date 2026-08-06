@@ -1,0 +1,45 @@
+[package]
+name = "local-transcriber-windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+build = "build.rs"
+description = "Windows Local Transcriber application"
+
+[[bin]]
+name = "local-stt-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+arboard.workspace = true
+cpal.workspace = true
+crossbeam-channel.workspace = true
+dirs.workspace = true
+eframe.workspace = true
+egui.workspace = true
+env_logger.workspace = true
+global-hotkey = "0.8"
+log.workspace = true
+muda.workspace = true
+parking_lot.workspace = true
+transcriber-core = { path = "../../crates/transcriber-core" }
+transcriber-ui = { path = "../../crates/transcriber-ui" }
+tray-icon.workspace = true
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+winresource = "0.1.31"
+
+[package.metadata.winresource]
+FileDescription = "Local speech-to-text powered by NVIDIA Parakeet TDT"
+OriginalFilename = "local-stt.exe"
+ProductName = "local-stt"

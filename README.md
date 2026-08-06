@@ -2,26 +2,101 @@
 
 Local, CPU-based speech-to-text for desktop Linux and Windows.
 
-Each target is a self-contained application so platform dependencies, build
-artifacts, packaging, and documentation cannot drift across operating systems.
+The repository is a Cargo workspace. Platform-independent transcription and UI
+behavior lives in shared crates; Linux and Windows applications contain only
+native adapters and lifecycle integration.
 
-| Target | Project | Getting started |
-|---|---|---|
-| Linux | [`linux/`](linux/) | [`linux/README.md`](linux/README.md) |
-| Windows | [`windows/`](windows/) | [`windows/README.md`](windows/README.md) |
+```text
+local-transcriber/
+├── Cargo.toml
+├── Cargo.lock
+├── crates/
+│   ├── transcriber-core/         # audio, ASR, model, config, commands, workflow
+│   └── transcriber-ui/           # shared egui theme, overlay, shortcuts, editors
+├── apps/
+│   ├── linux/                    # GTK/tray/hotkey/paste/script platform adapters
+│   └── windows/                  # Win32/tray/hotkey/paste/script platform adapters
+└── scripts/
+    ├── linux/
+    └── windows/
+```
 
-Run Cargo and platform scripts from the target directory you are working on.
+## Architecture
 
-## 👏 Credits & Acknowledgments
+`transcriber-core` owns reusable behavior:
 
-This project is directly derived from and inspired by the excellent work of **[FirePheonix](https://github.com/FirePheonix)**.
+- microphone buffering, recorder lifecycle, silence trimming, and resampling
+- Sherpa/Parakeet recognizer setup and transcription
+- model download, checksum verification, and extraction
+- the configuration schema, normalization, and storage workflow
+- voice-command aliases, validation, matching, and ordered execution
+- dual-hotkey registration policy and shortcut identity helpers
+- recording-session state, chunk ordering, and the bounded transcription worker
+- pure microphone-selection identity and result-delivery decisions
+- a narrow `TranscriberCore` orchestration facade
 
-While this repository was re-structured as a standalone project rather than a GitHub fork, it relies heavily on their original CPU-optimized implementation:
+Pure helpers remain directly callable, including
+`transcriber_core::audio::resample_linear`,
+`transcriber_core::commands::normalize_phrase`, and
+`transcriber_core::config::save`.
 
-* **Original Concept & Base Code:** [FirePheonix/parakeet-tdt-v3-CPU-optimized](https://github.com/FirePheonix/parakeet-tdt-v3-CPU-optimized)
-* **Architecture & Writeup:** [Shubham's Blog: How I ran Parakeet STT on CPU](https://blogs.shubhamz.dev/systems/how-i-ran-parakeet-stt-on-cpu)
+`transcriber-ui` owns shared egui presentation:
 
-### Key Differences in This Repository:
-* 🐧 Added a dedicated, native **Linux target** and build workflow.
-* 🪟 Restructured and updated the **Windows target** to align with the shared desktop layout.
-* ✨ Added custom feature tweaks and optimizations (auto paste after transcribing, select mic device, sha256 model check, hide notifications).
+- application theme and microphone tray-icon rendering
+- notification/recording/result overlay and result-delivery workflow
+- Settings form, complete Settings panel, and shortcut capture
+- Voice Commands editor
+- tray status/action models and menu text
+
+The platform applications supply focused adapters for native recording-device
+discovery, global hotkeys, clipboard/input injection, tray integration, file
+selection, script launchers, instance locking, app-data paths, and native window
+behavior. The workspace root is intentionally virtual and has no ambiguous
+`src/` application.
+
+## Linux
+
+```bash
+./scripts/linux/install-linux.sh
+./scripts/linux/run-linux.sh
+```
+
+See [`apps/linux/README.md`](apps/linux/README.md) for dependencies, desktop
+session notes, auditing, and packaging.
+
+## Windows
+
+From PowerShell:
+
+```powershell
+.\scripts\windows\build-windows.ps1
+.\scripts\windows\run-windows.ps1
+```
+
+See [`apps/windows/README.md`](apps/windows/README.md) for Windows requirements,
+auditing, and packaging.
+
+## Workspace quality gates
+
+Linux:
+
+```bash
+./scripts/linux/audit-linux.sh
+```
+
+Windows:
+
+```powershell
+.\scripts\windows\audit-windows.ps1
+```
+
+Both gates format the entire workspace and run Clippy, tests, and a release build
+for the shared crates plus the selected platform application using the single
+root `Cargo.lock`.
+
+## Credits and acknowledgments
+
+This project is directly derived from and inspired by the work of
+[FirePheonix](https://github.com/FirePheonix), especially
+[parakeet-tdt-v3-CPU-optimized](https://github.com/FirePheonix/parakeet-tdt-v3-CPU-optimized),
+and the associated architecture write-up by Shubham.

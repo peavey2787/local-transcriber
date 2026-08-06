@@ -2,10 +2,12 @@
 
 use anyhow::{bail, Context, Result};
 use std::io::ErrorKind;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use transcriber_core::commands::{CommandWorker, ScriptOutput, ScriptRunner};
+use windows_sys::Win32::System::Threading::CREATE_NEW_CONSOLE;
 
 struct WindowsScriptRunner;
 
@@ -15,8 +17,7 @@ impl ScriptRunner for WindowsScriptRunner {
     }
 
     fn run_script(&self, script: &str) -> Result<ScriptOutput> {
-        execute_script(script)?;
-        Ok(ScriptOutput::default())
+        execute_script(script)
     }
 }
 
@@ -49,7 +50,7 @@ fn canonical_script_path(script: &str) -> Result<PathBuf> {
         .with_context(|| format!("resolve script path {}", path.display()))
 }
 
-fn execute_script(script: &str) -> Result<()> {
+fn execute_script(script: &str) -> Result<ScriptOutput> {
     validate_script_path(script)?;
     let path = canonical_script_path(script)?;
     let working_directory = path
@@ -57,28 +58,48 @@ fn execute_script(script: &str) -> Result<()> {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
 
-    let status = match extension(&path).as_str() {
-        "ps1" => Command::new("powershell.exe")
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-            .arg(&path)
-            .current_dir(working_directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status(),
-        "bat" | "cmd" => Command::new("cmd.exe")
-            .arg("/C")
-            .arg(&path)
-            .current_dir(working_directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .status(),
-        "py" => run_python(&path, working_directory),
+    let (status, output) = match extension(&path).as_str() {
+        "ps1" => (
+            Command::new("powershell.exe")
+                .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+                .arg(&path)
+                .current_dir(working_directory)
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status(),
+            ScriptOutput::default(),
+        ),
+        "bat" | "cmd" => (
+            run_batch_in_console(&path, working_directory),
+            ScriptOutput {
+                stdout: "Batch script completed in Command Prompt.".to_string(),
+                stderr: String::new(),
+            },
+        ),
+        "py" => (run_python(&path, working_directory), ScriptOutput::default()),
         _ => unreachable!("validated extension"),
-    }
-    .with_context(|| format!("start {}", path.display()))?;
-    ensure_success(&path, status)
+    };
+
+    let status = status.with_context(|| format!("start {}", display_path(&path)))?;
+    ensure_success(&path, status)?;
+    Ok(output)
+}
+
+fn run_batch_in_console(path: &Path, working_directory: &Path) -> std::io::Result<ExitStatus> {
+    // Batch files commonly contain interactive commands such as `pause`. The
+    // application is a GUI process and has no console stdin, so launching them
+    // with redirected/null input makes those commands fail with exit code 1.
+    // Give cmd.exe its own visible console and wait for it to finish so script
+    // chains still execute in order.
+    Command::new("cmd.exe")
+        .args(["/D", "/Q", "/C"])
+        .arg(path)
+        .current_dir(working_directory)
+        .creation_flags(CREATE_NEW_CONSOLE)
+        .env("LOCAL_STT_VOICE_COMMAND", "1")
+        .env("LOCAL_STT_SCRIPT_PATH", path.as_os_str())
+        .status()
 }
 
 fn run_python(path: &Path, working_directory: &Path) -> std::io::Result<ExitStatus> {
@@ -111,10 +132,19 @@ fn extension(path: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+fn display_path(path: &Path) -> String {
+    let display = path.to_string_lossy();
+    display
+        .strip_prefix(r"\\?\")
+        .unwrap_or(display.as_ref())
+        .to_string()
+}
+
 fn ensure_success(path: &Path, status: ExitStatus) -> Result<()> {
+    let path = display_path(path);
     if status.success() {
-        println!("[local-stt] voice-command script completed: {}", path.display());
+        println!("[local-stt] voice-command script completed: {path}");
         return Ok(());
     }
-    bail!("{} exited with {}", path.display(), status)
+    bail!("{path} exited with {status}")
 }

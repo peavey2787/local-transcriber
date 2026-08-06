@@ -11,6 +11,17 @@ use crate::platform::select_voice_command_script;
 
 use super::controller::LocalSttApp;
 
+fn compact_output(value: &str) -> String {
+    const MAX_CHARS: usize = 240;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.chars().count() <= MAX_CHARS {
+        return compact;
+    }
+    let mut shortened = compact.chars().take(MAX_CHARS).collect::<String>();
+    shortened.push('…');
+    shortened
+}
+
 fn begin_native_window_drag() {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -288,8 +299,17 @@ impl LocalSttApp {
             self.voice_commands.running = false;
             self.restore_idle_tray_after_command();
             match event.result {
-                Ok(_output) => {
-                    let message = format!("Voice command completed: {}", event.phrase);
+                Ok(output) => {
+                    let output_text = output.display_text();
+                    let message = if output_text.trim().is_empty() {
+                        format!("Voice command completed: {}", event.phrase)
+                    } else {
+                        format!(
+                            "Voice command completed: {} — {}",
+                            event.phrase,
+                            compact_output(&output_text)
+                        )
+                    };
                     log::info!("voice command completed: {}", event.phrase);
                     if self.voice_commands.open {
                         self.voice_commands.set_message(message, true);

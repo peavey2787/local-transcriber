@@ -197,7 +197,7 @@ impl LocalSttApp {
             self.hotkeys.is_bound(),
             presses.recording,
             panel_visible,
-            self.settings.is_capturing_hotkey() || self.voice_commands.form.capturing_hotkey,
+            self.settings.capturing_hotkey || self.voice_commands.form.capturing_hotkey,
         ) {
             self.toggle_record();
         } else if self.config.voice_commands_enabled

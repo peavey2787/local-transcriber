@@ -45,7 +45,10 @@ impl ResultDeliveryHost for LocalSttApp {
     }
 
     fn dismiss_overlay(&mut self) {
-        self.overlay.dismiss();
+        // Auto-paste must park the overlay in the same frame. A fade-out keeps
+        // the native window visible long enough for some Linux desktops to
+        // reclaim focus after Ctrl+V was delivered to the captured target.
+        self.overlay.dismiss_immediately();
     }
 }
 

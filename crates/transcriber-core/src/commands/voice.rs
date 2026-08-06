@@ -221,6 +221,17 @@ mod tests {
     }
 
     #[test]
+    fn question_mark_alias_matches_identical_transcript() {
+        let commands = vec![VoiceCommand {
+            phrase: "Hello?".into(),
+            scripts: vec!["hello.sh".into()],
+        }];
+
+        let matched = matching_command(&commands, "Hello?").expect("command should match");
+        assert_eq!(matched.phrase, "Hello?");
+    }
+
+    #[test]
     fn overlapping_aliases_are_rejected() {
         let commands = vec![
             VoiceCommand {

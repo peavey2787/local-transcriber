@@ -5,6 +5,7 @@ use transcriber_ui::overlay::OverlayState;
 use transcriber_ui::tray::TrayStatus;
 use crate::paste::PasteTarget;
 use transcriber_core::audio::SAMPLE_RATE;
+use transcriber_core::commands::matching_command;
 
 use super::controller::LocalSttApp;
 use super::transcription::{QueueError, TranscriptionEvent};
@@ -134,6 +135,11 @@ impl LocalSttApp {
             RecordingPurpose::VoiceCommand => "local-stt — recording voice command…",
         });
         println!("[local-stt] recording {purpose:?} (live {LIVE_CHUNK_SECONDS}s chunks)");
+        if purpose == RecordingPurpose::VoiceCommand {
+            crate::voice_commands::append_diagnostic(&format!(
+                "HOTKEY start voice-command recording session={session_id}"
+            ));
+        }
     }
 
     fn handle_microphone_start_error(&mut self, error: anyhow::Error) {
@@ -178,6 +184,11 @@ impl LocalSttApp {
             RecordingPurpose::VoiceCommand => "local-stt — recognizing voice command…",
         });
         println!("[local-stt] stopped — expecting {expected} chunks");
+        if purpose == RecordingPurpose::VoiceCommand {
+            crate::voice_commands::append_diagnostic(&format!(
+                "HOTKEY stop voice-command recording session={session_id} expected_chunks={expected}"
+            ));
+        }
 
         if tail.len() >= MIN_FINAL_CHUNK_SAMPLES {
             self.spawn_chunk(session_id, chunk_id, tail);
@@ -209,6 +220,16 @@ impl LocalSttApp {
 
         match purpose {
             RecordingPurpose::Transcription if errors.is_empty() => {
+                if self.config.voice_commands_enabled
+                    && matching_command(&self.config.voice_commands, &text).is_some()
+                {
+                    eprintln!(
+                        "[local-stt] transcription matched a configured voice command, but the normal transcription hotkey was used; scripts were intentionally not executed"
+                    );
+                    crate::voice_commands::append_diagnostic(
+                        "IGNORED matching phrase recorded with normal transcription hotkey",
+                    );
+                }
                 self.present_transcription(text);
                 self.tray.set_status(TrayStatus::Idle);
                 self.tray.set_tooltip("local-stt — Parakeet ready");
@@ -232,6 +253,9 @@ impl LocalSttApp {
                     errors.len()
                 );
                 for error in errors {
+                    crate::voice_commands::append_diagnostic(&format!(
+                        "RECOGNITION failure error={error}"
+                    ));
                     log::error!("{error}");
                 }
                 if self.config.show_result_notifications {

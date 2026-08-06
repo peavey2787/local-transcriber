@@ -248,6 +248,10 @@ impl LocalSttApp {
         self.tray.set_status(TrayStatus::Busy);
         self.tray
             .set_tooltip(&format!("local-stt — testing voice command: {}", command.phrase));
+        crate::voice_commands::append_diagnostic(&format!(
+            "TEST scripts={}",
+            command.scripts.len()
+        ));
         self.command_worker.execute(command);
     }
 
@@ -271,12 +275,21 @@ impl LocalSttApp {
             spoken.trim(),
             normalized
         );
+        crate::voice_commands::append_diagnostic(&format!(
+            "RECOGNIZED transcript_chars={} normalized_chars={}",
+            spoken.trim().chars().count(),
+            normalized.chars().count()
+        ));
         let Some(command) = matching_command(&self.config.voice_commands, &spoken) else {
             log::warn!("recognized voice command did not match a configured alias");
             eprintln!(
                 "[local-stt] no configured voice-command alias matched {:?}",
                 normalized
             );
+            crate::voice_commands::append_diagnostic(&format!(
+                "NO_MATCH configured_commands={}",
+                self.config.voice_commands.len()
+            ));
             self.restore_idle_tray_after_command();
             if self.config.show_result_notifications {
                 let message = if spoken.trim().is_empty() {
@@ -301,13 +314,38 @@ impl LocalSttApp {
             command.phrase,
             command.scripts.len()
         );
+        crate::voice_commands::append_diagnostic(&format!(
+            "MATCH scripts={}",
+            command.scripts.len()
+        ));
+        if let Err(error) = self.command_worker.validate(std::slice::from_ref(&command)) {
+            let message = format!(
+                "Voice command matched, but its script configuration is invalid: {error:#}"
+            );
+            crate::voice_commands::append_diagnostic(&format!("VALIDATION_FAILED {message}"));
+            eprintln!("[local-stt] {message}");
+            self.restore_idle_tray_after_command();
+            if self.config.show_result_notifications {
+                self.overlay.show_notice(
+                    message,
+                    false,
+                    self.now(),
+                    self.config.notification_seconds(),
+                );
+            } else {
+                self.overlay.dismiss();
+            }
+            return;
+        }
         self.voice_commands.running = true;
         self.tray.set_status(TrayStatus::Busy);
         self.tray
             .set_tooltip(&format!("local-stt — running voice command: {}", command.phrase));
-        if self.config.show_transcribing_notifications {
-            self.overlay
-                .show_loading(format!("Running voice command: {}", command.phrase));
+        if self.config.show_transcribing_notifications || self.config.show_result_notifications {
+            self.overlay.show_loading(format!(
+                "Voice command matched — starting: {}",
+                command.phrase
+            ));
         } else {
             self.overlay.dismiss();
         }
@@ -335,6 +373,10 @@ impl LocalSttApp {
                         )
                     };
                     println!("[local-stt] {message}");
+                    crate::voice_commands::append_diagnostic(&format!(
+                        "COMPLETE output_chars={}",
+                        output_text.chars().count()
+                    ));
                     log::info!("voice command completed: {}", event.phrase);
                     if self.voice_commands.open {
                         self.voice_commands.set_message(message, true);
@@ -353,6 +395,10 @@ impl LocalSttApp {
                 Err(error) => {
                     let message = format!("Voice command failed: {error}");
                     eprintln!("[local-stt] {message}");
+                    crate::voice_commands::append_diagnostic(&format!(
+                        "FAILED error_chars={}",
+                        error.chars().count()
+                    ));
                     log::error!("voice command {:?} failed: {error}", event.phrase);
                     if self.voice_commands.open {
                         self.voice_commands.set_message(message, false);

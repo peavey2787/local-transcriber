@@ -1,8 +1,8 @@
 //! Best-effort Ctrl+V synthesis for Linux desktops.
 //!
-//! X11 uses xdotool and remembers the window focused when recording began.
-//! Wayland tries wtype, then ydotool. Clipboard copy is always performed even
-//! if a desktop compositor blocks synthetic keyboard input.
+//! X11 remembers and explicitly reactivates the window focused when recording
+//! began before sending input. Wayland tries wtype, then ydotool. Clipboard copy
+//! is always performed even if a desktop compositor blocks synthetic input.
 
 use anyhow::{bail, Context, Result};
 use std::env;
@@ -31,10 +31,12 @@ impl PasteTarget {
 
         if let Some(window) = self.x11_window.as_deref() {
             if command_exists("xdotool") {
-                run_backend(
-                    "xdotool",
-                    ["key", "--window", window, "--clearmodifiers", "ctrl+v"],
-                )?;
+                activate_x11_window(window)?;
+                thread::sleep(Duration::from_millis(40));
+                run_backend("xdotool", ["key", "--clearmodifiers", "ctrl+v"])?;
+                // Keep the destination active after the synthetic shortcut so
+                // the user's next Space, character, or Enter goes there.
+                activate_x11_window(window)?;
                 return Ok("xdotool");
             }
         }
@@ -59,10 +61,9 @@ impl PasteTarget {
         thread::sleep(Duration::from_millis(50));
         if let Some(window) = self.x11_window.as_deref() {
             if command_exists("xdotool") {
-                run_backend(
-                    "xdotool",
-                    ["key", "--window", window, "--clearmodifiers", "Return"],
-                )?;
+                activate_x11_window(window)?;
+                run_backend("xdotool", ["key", "--clearmodifiers", "Return"])?;
+                activate_x11_window(window)?;
                 return Ok("xdotool");
             }
         }
@@ -81,6 +82,17 @@ impl PasteTarget {
         }
         bail!("no keyboard backend found for Enter; install xdotool, wtype, or ydotool")
     }
+}
+
+fn activate_x11_window(window: &str) -> Result<()> {
+    run_backend("xdotool", ["windowactivate", "--sync", window])
+        .or_else(|activate_error| {
+            run_backend("xdotool", ["windowfocus", "--sync", window]).with_context(|| {
+                format!(
+                    "reactivate original paste target {window}; windowactivate failed: {activate_error:#}"
+                )
+            })
+        })
 }
 
 fn capture_x11_window() -> Option<String> {

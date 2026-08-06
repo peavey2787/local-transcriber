@@ -5,13 +5,60 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-if (Test-Path Variable:PSNativeCommandUseErrorActionPreference) {
-    $PSNativeCommandUseErrorActionPreference = $false
-}
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $lockPath = Join-Path $projectRoot "Cargo.lock"
 $backupPath = Join-Path $projectRoot "Cargo.lock.windows-backup"
+
+function Invoke-CargoProcess {
+    param(
+        [Parameter(Mandatory)]
+        [string[]] $Arguments,
+        [switch] $Quiet
+    )
+
+    $stdoutPath = Join-Path ([System.IO.Path]::GetTempPath()) ("local-transcriber-cargo-{0}.stdout" -f [guid]::NewGuid().ToString("N"))
+    $stderrPath = Join-Path ([System.IO.Path]::GetTempPath()) ("local-transcriber-cargo-{0}.stderr" -f [guid]::NewGuid().ToString("N"))
+
+    try {
+        $process = Start-Process `
+            -FilePath "cargo.exe" `
+            -ArgumentList $Arguments `
+            -WorkingDirectory $projectRoot `
+            -NoNewWindow `
+            -Wait `
+            -PassThru `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath
+
+        $stdout = if (Test-Path -LiteralPath $stdoutPath) {
+            Get-Content -LiteralPath $stdoutPath -Raw -ErrorAction SilentlyContinue
+        }
+        else {
+            ""
+        }
+        $stderr = if (Test-Path -LiteralPath $stderrPath) {
+            Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+        }
+        else {
+            ""
+        }
+
+        if (-not $Quiet) {
+            if (-not [System.String]::IsNullOrWhiteSpace($stdout)) {
+                Write-Host ($stdout.TrimEnd())
+            }
+            if (-not [System.String]::IsNullOrWhiteSpace($stderr)) {
+                Write-Host ($stderr.TrimEnd())
+            }
+        }
+
+        return [int] $process.ExitCode
+    }
+    finally {
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
 
 if (-not (Get-Command cargo.exe -ErrorAction SilentlyContinue)) {
     throw "cargo.exe is required. Install the Rust MSVC toolchain from https://rustup.rs/."
@@ -31,10 +78,11 @@ if ($Offline) {
     $treeArguments += "--offline"
 }
 
-# Preserve a valid checked-in lock exactly. Regenerate only when Cargo itself
-# reports that the manifests and lock no longer agree.
-& cargo.exe @treeArguments *> $null
-if ($LASTEXITCODE -eq 0) {
+# Do not invoke Cargo directly with stderr redirected into PowerShell's error
+# stream. Windows PowerShell 5.1 can turn Cargo's expected nonzero result into
+# a terminating NativeCommandError before $LASTEXITCODE can be inspected.
+$treeExitCode = Invoke-CargoProcess -Arguments $treeArguments -Quiet
+if ($treeExitCode -eq 0) {
     Write-Host "Cargo.lock already matches the Windows dependency graph."
     return
 }
@@ -57,13 +105,13 @@ try {
         $generateArguments += "--offline"
     }
 
-    & cargo.exe @generateArguments
-    if ($LASTEXITCODE -ne 0) {
+    $generateExitCode = Invoke-CargoProcess -Arguments $generateArguments
+    if ($generateExitCode -ne 0) {
         throw "Cargo could not regenerate Cargo.lock from the workspace manifests."
     }
 
-    & cargo.exe @treeArguments | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $verifyExitCode = Invoke-CargoProcess -Arguments $treeArguments
+    if ($verifyExitCode -ne 0) {
         throw "The regenerated Cargo.lock still does not match the Windows dependency graph."
     }
 

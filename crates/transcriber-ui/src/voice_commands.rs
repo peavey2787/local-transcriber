@@ -85,6 +85,7 @@ pub struct VoiceCommandsPanelOptions<'a> {
 pub struct VoiceCommandsPanelResponse {
     pub save_requested: bool,
     pub close_requested: bool,
+    pub drag_requested: bool,
     pub browse_request: Option<(usize, usize)>,
     pub test_request: Option<usize>,
 }
@@ -165,6 +166,9 @@ fn draw_header(
                 Sense::drag(),
             )
             .on_hover_cursor(CursorIcon::Grab);
+        if drag.is_pointer_button_down_on() {
+            response.drag_requested = true;
+        }
         if drag.drag_started() {
             ctx.send_viewport_cmd(ViewportCommand::StartDrag);
         }

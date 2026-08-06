@@ -7,8 +7,27 @@ use transcriber_ui::voice_commands::{draw_voice_commands_panel, VoiceCommandsPan
 
 use crate::config;
 use crate::hotkey::{capture_shortcut, friendly_name, same_shortcut, validate, CaptureOutcome};
+use crate::platform::select_voice_command_script;
 
 use super::controller::LocalSttApp;
+
+fn begin_native_window_drag() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, SendMessageW, HTCAPTION, WM_NCLBUTTONDOWN,
+    };
+
+    // SAFETY: The foreground HWND is borrowed only for this synchronous
+    // non-client drag request. ReleaseCapture hands mouse capture back to the
+    // window manager before WM_NCLBUTTONDOWN begins the native move loop.
+    unsafe {
+        let window = GetForegroundWindow();
+        if !window.is_null() {
+            ReleaseCapture();
+            SendMessageW(window, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
+        }
+    }
+}
 
 impl LocalSttApp {
     pub(in crate::app) fn open_voice_commands(&mut self) {
@@ -51,12 +70,32 @@ impl LocalSttApp {
                 platform_name: "Windows",
                 accepted_extensions: ".ps1, .bat, .cmd, and .py",
                 path_hint: r"C:\full\path\to\script.ps1",
-                browse_enabled: false,
+                browse_enabled: true,
                 recording_hotkey: &self.config.hotkey,
             },
             friendly_name,
         );
 
+        if panel.drag_requested {
+            begin_native_window_drag();
+        }
+        if let Some((command_index, script_index)) = panel.browse_request {
+            match select_voice_command_script() {
+                Ok(Some(selected)) => {
+                    if let Some(script) = self
+                        .voice_commands
+                        .form
+                        .commands
+                        .get_mut(command_index)
+                        .and_then(|command| command.scripts.get_mut(script_index))
+                    {
+                        *script = selected;
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => self.voice_commands.set_message(error, false),
+            }
+        }
         if let Some(command_index) = panel.test_request {
             self.test_voice_command(command_index);
         }

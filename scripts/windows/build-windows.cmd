@@ -63,8 +63,18 @@ if errorlevel 1 (
 
 popd
 echo.
-echo Windows release build ready at:
+echo ============================================================
+echo Windows installation and build completed successfully.
+echo Release executable:
 echo   %RELEASE_DIRECTORY%\local-stt-rs.exe
+echo.
+echo Next, run the application with:
+echo   %~dp0run-windows.cmd
+echo ============================================================
+if not defined LT_NO_PAUSE (
+    echo.
+    set /p "BUILD_DONE=Press Enter to close this window..."
+)
 exit /b 0
 
 :restore_pause_setting

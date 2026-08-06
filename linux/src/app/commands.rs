@@ -92,7 +92,7 @@ fn select_script_file() -> Option<String> {
     filter.add_pattern("*.sh");
     filter.add_pattern("*.bash");
     filter.add_pattern("*.py");
-    dialog.add_filter(&filter);
+    dialog.add_filter(filter);
     dialog.set_modal(true);
     dialog.set_keep_above(true);
 

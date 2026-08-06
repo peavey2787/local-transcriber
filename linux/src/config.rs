@@ -42,7 +42,7 @@ pub(crate) struct Config {
     /// Global shortcut for voice-command recording. Must differ from `hotkey`.
     #[serde(default)]
     pub(crate) voice_commands_hotkey: String,
-    /// Exact phrase-to-script-chain mappings.
+    /// Comma-separated phrase aliases mapped to ordered script chains.
     #[serde(default)]
     pub(crate) voice_commands: Vec<VoiceCommand>,
     /// Seconds before temporary notices and untouched results close.

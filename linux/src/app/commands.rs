@@ -1,7 +1,8 @@
 //! Voice-command configuration, matching, and background script execution.
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, Color32, CursorIcon, RichText, Sense, ViewportCommand};
+use gtk::prelude::*;
 use std::thread;
 
 use crate::config::{self, VoiceCommand};
@@ -76,6 +77,36 @@ fn help_text(text: impl Into<String>) -> RichText {
     RichText::new(text).size(13.0).weak()
 }
 
+fn select_script_file() -> Option<String> {
+    let dialog = gtk::FileChooserDialog::with_buttons(
+        Some("Select a voice-command script"),
+        None::<&gtk::Window>,
+        gtk::FileChooserAction::Open,
+        &[
+            ("Cancel", gtk::ResponseType::Cancel),
+            ("Select", gtk::ResponseType::Accept),
+        ],
+    );
+    let filter = gtk::FileFilter::new();
+    filter.set_name(Some("Linux scripts (*.sh, *.bash, *.py)"));
+    filter.add_pattern("*.sh");
+    filter.add_pattern("*.bash");
+    filter.add_pattern("*.py");
+    dialog.add_filter(&filter);
+    dialog.set_modal(true);
+    dialog.set_keep_above(true);
+
+    let selected = if dialog.run() == gtk::ResponseType::Accept {
+        dialog
+            .filename()
+            .map(|path| path.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+    dialog.close();
+    selected
+}
+
 impl LocalSttApp {
     pub(in crate::app) fn open_voice_commands(&mut self) {
         if self.recording_pipeline_busy() || self.voice_commands.running {
@@ -121,12 +152,26 @@ impl LocalSttApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.heading("Voice Commands");
-                        ui.label(help_text(
-                            "Record a phrase with a separate hotkey and run its scripts in order.",
-                        ));
-                    });
+                    let header_width = (ui.available_width() - 88.0).max(240.0);
+                    let header = ui.allocate_ui_with_layout(
+                        egui::vec2(header_width, 50.0),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.heading("Voice Commands");
+                            ui.label(help_text(
+                                "Record a phrase with a separate hotkey and run its scripts in order.",
+                            ));
+                        },
+                    );
+                    let drag = ui.interact(
+                        header.response.rect,
+                        ui.id().with("voice-commands-window-drag"),
+                        Sense::drag(),
+                    );
+                    let drag = drag.on_hover_cursor(CursorIcon::Grab);
+                    if drag.drag_started() {
+                        ctx.send_viewport_cmd(ViewportCommand::StartDrag);
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("Close").clicked() {
                             close_requested = true;
@@ -215,7 +260,7 @@ impl LocalSttApp {
         ui.add_space(8.0);
         egui::Frame::NONE
             .fill(Color32::from_rgb(23, 25, 25))
-            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(54, 58, 58)))
+            .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(54, 58, 58)))
             .corner_radius(egui::CornerRadius::same(9))
             .inner_margin(12.0)
             .show(ui, |ui| {
@@ -264,12 +309,7 @@ impl LocalSttApp {
 
     fn draw_command_list(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Commands and script chains").strong());
-                ui.label(help_text(
-                    "Phrase matching ignores capitalization, repeated spaces, and punctuation around words, but otherwise requires an exact match.",
-                ));
-            });
+            ui.label(RichText::new("Commands and script chains").strong());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Add command").clicked() {
                     self.voice_commands.commands.push(VoiceCommand {
@@ -279,13 +319,22 @@ impl LocalSttApp {
                 }
             });
         });
+        ui.add(
+            egui::Label::new(help_text(
+                "Separate alternative spoken words or phrases with commas. Matching ignores capitalization, repeated spaces, and punctuation around words, but otherwise remains exact.",
+            ))
+            .wrap(),
+        );
         ui.add_space(8.0);
 
         let mut remove_command = None;
         for (command_index, command) in self.voice_commands.commands.iter_mut().enumerate() {
             egui::Frame::NONE
                 .fill(Color32::from_rgb(20, 22, 22))
-                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(48, 52, 52)))
+                .stroke(egui::Stroke::new(
+                    1.0_f32,
+                    Color32::from_rgb(48, 52, 52),
+                ))
                 .corner_radius(egui::CornerRadius::same(9))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
@@ -300,8 +349,11 @@ impl LocalSttApp {
                             },
                         );
                     });
-                    ui.label(help_text("Spoken word or phrase"));
-                    ui.text_edit_singleline(&mut command.phrase);
+                    ui.label(help_text("Spoken words or phrases, separated by commas"));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut command.phrase)
+                            .hint_text("Hello, hello there, start report"),
+                    );
                     ui.add_space(8.0);
                     ui.label(help_text(
                         "Scripts run from top to bottom. Linux accepts .sh, .bash, and .py files.",
@@ -310,11 +362,18 @@ impl LocalSttApp {
                     let mut remove_script = None;
                     for (script_index, script) in command.scripts.iter_mut().enumerate() {
                         ui.horizontal(|ui| {
+                            let controls_width = 156.0 + ui.spacing().item_spacing.x * 2.0;
+                            let path_width = (ui.available_width() - controls_width).max(140.0);
                             ui.add_sized(
-                                [ui.available_width() - 78.0, 28.0],
+                                [path_width, 28.0],
                                 egui::TextEdit::singleline(script)
                                     .hint_text("/full/path/to/script.sh"),
                             );
+                            if ui.button("Browse…").clicked() {
+                                if let Some(selected) = select_script_file() {
+                                    *script = selected;
+                                }
+                            }
                             if ui.button("Remove").clicked() {
                                 remove_script = Some(script_index);
                             }
@@ -416,6 +475,7 @@ impl LocalSttApp {
     }
 
     pub(super) fn dispatch_voice_command(&mut self, spoken: String) {
+        log::info!("voice-command transcript: {:?}", spoken.trim());
         let Some(command) = matching_command(&self.config.voice_commands, &spoken) else {
             self.restore_idle_tray_after_command();
             if self.config.show_result_notifications {
@@ -436,6 +496,11 @@ impl LocalSttApp {
             return;
         };
 
+        log::info!(
+            "voice command matched {:?} from transcript {:?}",
+            command.phrase,
+            spoken.trim()
+        );
         self.voice_commands.running = true;
         self.tray.set_status(TrayStatus::Busy);
         self.tray

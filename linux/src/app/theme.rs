@@ -20,6 +20,7 @@ pub(super) fn configure(context: &egui::Context) {
     style
         .text_styles
         .insert(TextStyle::Monospace, FontId::monospace(14.0));
+    style.interaction.selectable_labels = false;
     style.spacing.item_spacing = egui::vec2(8.0, 7.0);
     style.spacing.interact_size.y = 30.0;
     context.set_style(style);

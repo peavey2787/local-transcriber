@@ -252,7 +252,7 @@ impl Overlay {
         if *ok {
             Frame::NONE
                 .fill(Color32::from_rgb(0x16, 0x17, 0x17))
-                .stroke(Stroke::new(1.0, BORDER))
+                .stroke(Stroke::new(1.0_f32, BORDER))
                 .corner_radius(CornerRadius::same(10))
                 .inner_margin(10.0)
                 .show(ui, |ui| {

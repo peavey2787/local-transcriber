@@ -18,19 +18,27 @@ impl LocalSttApp {
         if self.settings.open || self.voice_commands.open {
             let width = SETTINGS_W.min((monitor.x - 24.0).max(360.0));
             let height = SETTINGS_H.min((monitor.y - 40.0).max(420.0));
-            let x = ((monitor.x - width) * 0.5).max(0.0);
-            let y = ((monitor.y - height) * 0.35).max(20.0);
+            let focus_voice_commands =
+                self.voice_commands.open && self.voice_commands.focus_pending;
+            let focus_settings = self.settings.open && self.settings.focus_pending;
+
             ctx.send_viewport_cmd(ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(x, y)));
             ctx.send_viewport_cmd(ViewportCommand::InnerSize(egui::vec2(width, height)));
             ctx.send_viewport_cmd(ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop));
-            if self.voice_commands.open && self.voice_commands.focus_pending {
+
+            // Recenter only when the panel is opened. Reapplying OuterPosition
+            // every frame would fight the native StartDrag command.
+            if focus_voice_commands || focus_settings {
+                let x = ((monitor.x - width) * 0.5).max(0.0);
+                let y = ((monitor.y - height) * 0.35).max(20.0);
+                ctx.send_viewport_cmd(ViewportCommand::OuterPosition(egui::pos2(x, y)));
                 ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                 ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+            if focus_voice_commands {
                 self.voice_commands.focus_pending = false;
-            } else if self.settings.focus_pending {
-                ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
-                ctx.send_viewport_cmd(ViewportCommand::Focus);
+            }
+            if focus_settings {
                 self.settings.focus_pending = false;
             }
             return;

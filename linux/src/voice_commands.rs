@@ -10,11 +10,26 @@ use crate::config::VoiceCommand;
 pub(crate) fn normalize_phrase(value: &str) -> String {
     value
         .split_whitespace()
-        .map(|word| word.trim_matches(|character: char| character.is_ascii_punctuation()))
+        .map(|word| {
+            word.trim_matches(|character: char| {
+                character.is_ascii_punctuation()
+                    || matches!(
+                        character,
+                        '“' | '”' | '‘' | '’' | '…' | '—' | '–'
+                    )
+            })
+        })
         .filter(|word| !word.is_empty())
         .map(str::to_lowercase)
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn normalized_aliases(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .split(',')
+        .map(normalize_phrase)
+        .filter(|alias| !alias.is_empty())
 }
 
 pub(crate) fn matching_command(commands: &[VoiceCommand], spoken: &str) -> Option<VoiceCommand> {
@@ -24,7 +39,7 @@ pub(crate) fn matching_command(commands: &[VoiceCommand], spoken: &str) -> Optio
     }
     commands
         .iter()
-        .find(|command| normalize_phrase(&command.phrase) == normalized)
+        .find(|command| normalized_aliases(&command.phrase).any(|alias| alias == normalized))
         .cloned()
 }
 
@@ -32,14 +47,20 @@ pub(crate) fn validate_command_list(commands: &[VoiceCommand]) -> Result<()> {
     if commands.is_empty() {
         bail!("Add at least one command before enabling the feature");
     }
-    let mut phrases = HashSet::new();
+
+    let mut claimed_aliases = HashSet::new();
     for (command_index, command) in commands.iter().enumerate() {
-        let normalized = normalize_phrase(&command.phrase);
-        if normalized.is_empty() {
-            bail!("Command {} needs a spoken word or phrase", command_index + 1);
+        let aliases = normalized_aliases(&command.phrase).collect::<HashSet<_>>();
+        if aliases.is_empty() {
+            bail!(
+                "Command {} needs at least one spoken word or phrase",
+                command_index + 1
+            );
         }
-        if !phrases.insert(normalized) {
-            bail!("Each voice-command phrase must be unique");
+        for alias in aliases {
+            if !claimed_aliases.insert(alias) {
+                bail!("Voice-command phrases must not overlap between commands");
+            }
         }
         if command.scripts.is_empty() {
             bail!("Command {:?} needs at least one script", command.phrase);
@@ -73,7 +94,10 @@ fn validate_script_path(script: &str) -> Result<()> {
         .unwrap_or_default()
         .to_ascii_lowercase();
     if !matches!(extension.as_str(), "sh" | "bash" | "py") {
-        bail!("Linux voice commands support .sh, .bash, and .py files: {}", path.display());
+        bail!(
+            "Linux voice commands support .sh, .bash, and .py files: {}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -117,10 +141,32 @@ mod tests {
             scripts: vec!["/tmp/report.sh".into()],
         }];
         assert_eq!(
-            matching_command(&commands, "  OPEN   reports. ").unwrap().phrase,
+            matching_command(&commands, "  OPEN   reports. ")
+                .unwrap()
+                .phrase,
             "Open Reports"
         );
         assert!(matching_command(&commands, "open report").is_none());
+    }
+
+    #[test]
+    fn comma_separated_aliases_match_case_and_punctuation_variants() {
+        let commands = vec![VoiceCommand {
+            phrase: "Hello, hello there, start report".into(),
+            scripts: vec!["/tmp/report.sh".into()],
+        }];
+
+        assert!(matching_command(&commands, "HELLO!").is_some());
+        assert!(matching_command(&commands, "Hello there?").is_some());
+        assert!(matching_command(&commands, "start report.").is_some());
+        assert!(matching_command(&commands, "hello report").is_none());
+    }
+
+    #[test]
+    fn punctuation_only_alias_duplicates_inside_one_command_are_harmless() {
+        let aliases = normalized_aliases("Hello,Hello.,Hello?,Hello!")
+            .collect::<HashSet<_>>();
+        assert_eq!(aliases, HashSet::from(["hello".to_string()]));
     }
 
     #[test]
@@ -132,20 +178,20 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_normalized_phrases_are_rejected_before_path_validation() {
+    fn duplicate_normalized_phrases_across_commands_are_rejected_before_paths() {
         let commands = vec![
             VoiceCommand {
-                phrase: "Build App".into(),
+                phrase: "Build App, compile".into(),
                 scripts: vec!["missing.sh".into()],
             },
             VoiceCommand {
-                phrase: " build   app ".into(),
+                phrase: " compile. ".into(),
                 scripts: vec!["other.sh".into()],
             },
         ];
         assert!(validate_command_list(&commands)
             .unwrap_err()
             .to_string()
-            .contains("unique"));
+            .contains("overlap"));
     }
 }

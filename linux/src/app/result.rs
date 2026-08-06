@@ -8,6 +8,7 @@ impl LocalSttApp {
     pub(super) fn present_transcription(&mut self, text: String) {
         let now = self.now();
         if text.is_empty() {
+            self.paste_target = None;
             self.present_no_speech(now);
             return;
         }
@@ -33,6 +34,7 @@ impl LocalSttApp {
                 }
             }
             Err(error) if self.config.auto_paste => {
+                self.paste_target = None;
                 self.show_result_error(
                     format!(
                         "Could not copy the transcription, so auto-paste was not attempted: {error}"

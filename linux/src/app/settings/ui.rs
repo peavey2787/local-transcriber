@@ -140,7 +140,7 @@ impl LocalSttApp {
 
         egui::Frame::NONE
             .fill(Color32::from_rgb(23, 25, 25))
-            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(54, 58, 58)))
+            .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(54, 58, 58)))
             .corner_radius(egui::CornerRadius::same(9))
             .inner_margin(12.0)
             .show(ui, |ui| {

@@ -264,7 +264,6 @@ impl LocalSttApp {
         let text = session.joined();
         let errors = session.errors();
         self.session = None;
-        self.paste_target = None;
 
         match purpose {
             RecordingPurpose::Transcription if errors.is_empty() => {
@@ -273,14 +272,17 @@ impl LocalSttApp {
                 self.tray.set_tooltip("local-stt — Parakeet ready");
             }
             RecordingPurpose::Transcription => {
+                self.paste_target = None;
                 self.present_transcription_failure(text, errors);
                 self.tray.set_status(TrayStatus::Idle);
                 self.tray.set_tooltip("local-stt — Parakeet ready");
             }
             RecordingPurpose::VoiceCommand if errors.is_empty() => {
+                self.paste_target = None;
                 self.dispatch_voice_command(text);
             }
             RecordingPurpose::VoiceCommand => {
+                self.paste_target = None;
                 self.tray.set_status(TrayStatus::Idle);
                 self.tray.set_tooltip("local-stt — Parakeet ready");
                 let summary = format!(

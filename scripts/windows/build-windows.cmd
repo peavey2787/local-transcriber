@@ -2,12 +2,25 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "BUILD_NO_PAUSE=0"
+set "BUILD_SKIP_PACKAGE=0"
+
+:parse_args
+if "%~1"=="" goto :args_done
 if /I "%~1"=="--no-pause" set "BUILD_NO_PAUSE=1"
 if /I "%~1"=="/no-pause" set "BUILD_NO_PAUSE=1"
+if /I "%~1"=="--skip-package" set "BUILD_SKIP_PACKAGE=1"
+if /I "%~1"=="/skip-package" set "BUILD_SKIP_PACKAGE=1"
+shift
+goto :parse_args
 
+:args_done
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "LIBRARY_DIRECTORY=%PROJECT_ROOT%\.native\lib"
 set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
+set "DISTRIBUTION_DIRECTORY=%PROJECT_ROOT%\dist"
+set "PACKAGE_NAME=local-stt-windows-x64"
+set "PACKAGE_DIRECTORY=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%"
+set "ARCHIVE_PATH=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%.zip"
 
 for %%C in (cargo.exe rustc.exe) do (
     where %%C >nul 2>nul
@@ -65,12 +78,31 @@ if errorlevel 1 (
     goto :build_fail
 )
 
+if "%BUILD_SKIP_PACKAGE%"=="0" (
+    echo.
+    echo ==^> Creating the Windows distribution folder and ZIP
+    set "SAVED_NO_PAUSE=%LT_NO_PAUSE%"
+    set "LT_NO_PAUSE=1"
+    call "%~dp0package-windows.cmd" --skip-build --no-pause
+    set "RC=!ERRORLEVEL!"
+    call :restore_pause_setting
+    if not "!RC!"=="0" goto :build_fail
+)
+
 popd
 echo.
 echo ============================================================
-echo Windows installation and build completed successfully.
+echo Windows installation, build, and packaging completed.
+echo.
 echo Release executable:
 echo   %RELEASE_DIRECTORY%\local-stt-rs.exe
+if "%BUILD_SKIP_PACKAGE%"=="0" (
+    echo.
+    echo Distribution folder:
+    echo   %PACKAGE_DIRECTORY%
+    echo Distribution ZIP:
+    echo   %ARCHIVE_PATH%
+)
 echo.
 echo Next, run the application with:
 echo   %~dp0run-windows.cmd

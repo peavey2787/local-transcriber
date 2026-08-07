@@ -1,13 +1,10 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "PACKAGE_SKIP_BUILD=0"
 set "PACKAGE_NO_PAUSE=0"
 
 :parse_args
 if "%~1"=="" goto :args_done
-if /I "%~1"=="--skip-build" set "PACKAGE_SKIP_BUILD=1"
-if /I "%~1"=="/skip-build" set "PACKAGE_SKIP_BUILD=1"
 if /I "%~1"=="--no-pause" set "PACKAGE_NO_PAUSE=1"
 if /I "%~1"=="/no-pause" set "PACKAGE_NO_PAUSE=1"
 shift
@@ -15,7 +12,8 @@ goto :parse_args
 
 :args_done
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
-set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
+set "TARGET_DIRECTORY=%PROJECT_ROOT%\target"
+set "RELEASE_DIRECTORY=%TARGET_DIRECTORY%\release"
 set "LIBRARY_DIRECTORY=%PROJECT_ROOT%\.native\lib"
 set "RUNTIME_RECEIPT=%PROJECT_ROOT%\.native\runtime.sha256"
 set "DISTRIBUTION_DIRECTORY=%PROJECT_ROOT%\dist"
@@ -24,6 +22,7 @@ set "PACKAGE_DIRECTORY=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%"
 set "ARCHIVE_PATH=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%.zip"
 set "STAGING_ROOT=%DISTRIBUTION_DIRECTORY%\.%PACKAGE_NAME%-staging"
 set "STAGING_PACKAGE_DIRECTORY=%STAGING_ROOT%\%PACKAGE_NAME%"
+set "BINARY=%RELEASE_DIRECTORY%\local-stt-rs.exe"
 
 where tar.exe >nul 2>nul
 if errorlevel 1 (
@@ -38,18 +37,21 @@ if errorlevel 1 (
     goto :fail
 )
 
-if "%PACKAGE_SKIP_BUILD%"=="0" (
-    call "%~dp0build-windows.cmd" --no-pause --skip-package
-    set "RC=!ERRORLEVEL!"
-    if not "!RC!"=="0" goto :fail
-)
-
-set "BINARY=%RELEASE_DIRECTORY%\local-stt-rs.exe"
 if not exist "%BINARY%" (
-    echo ERROR: The Windows release binary is missing after the build.
+    echo ERROR: The Windows release binary is missing:
+    echo   %BINARY%
+    echo Run scripts\windows\install-windows.cmd first.
     set "RC=1"
     goto :fail
 )
+
+set "SAVED_NO_PAUSE=%LT_NO_PAUSE%"
+set "LT_NO_PAUSE=1"
+call "%~dp0prepare-sherpa-runtime.cmd"
+set "RC=!ERRORLEVEL!"
+call :restore_pause_setting
+if not "!RC!"=="0" goto :fail
+
 if not exist "%RUNTIME_RECEIPT%" (
     echo ERROR: The verified native-runtime receipt is missing.
     set "RC=1"
@@ -73,14 +75,6 @@ if errorlevel 1 goto :copy_fail
 copy /y "%PROJECT_ROOT%\README.md" "%STAGING_PACKAGE_DIRECTORY%\" >nul
 if errorlevel 1 goto :copy_fail
 copy /y "%PROJECT_ROOT%\apps\windows\SECURITY.md" "%STAGING_PACKAGE_DIRECTORY%\" >nul
-if errorlevel 1 goto :copy_fail
-
-> "%STAGING_PACKAGE_DIRECTORY%\run-windows.cmd" (
-    echo @echo off
-    echo setlocal EnableExtensions
-    echo start "" /D "%%~dp0" "%%~dp0local-stt.exe" %%*
-    echo exit /b %%ERRORLEVEL%%
-)
 if errorlevel 1 goto :copy_fail
 
 if exist "%PACKAGE_DIRECTORY%" rmdir /s /q "%PACKAGE_DIRECTORY%" >nul 2>nul
@@ -109,6 +103,8 @@ if errorlevel 1 (
 )
 
 if exist "%STAGING_ROOT%" rmdir /s /q "%STAGING_ROOT%" >nul 2>nul
+echo.
+echo Windows distribution created successfully.
 echo Distribution folder: %PACKAGE_DIRECTORY%
 echo Packed: %ARCHIVE_PATH%
 echo SHA-256: !ARCHIVE_HASH!
@@ -122,6 +118,15 @@ set "RC=1"
 if exist "%STAGING_ROOT%" rmdir /s /q "%STAGING_ROOT%" >nul 2>nul
 
 goto :fail
+
+:restore_pause_setting
+if defined SAVED_NO_PAUSE (
+    set "LT_NO_PAUSE=!SAVED_NO_PAUSE!"
+) else (
+    set "LT_NO_PAUSE="
+)
+set "SAVED_NO_PAUSE="
+exit /b 0
 
 :sha256
 set "HASH_VALUE="

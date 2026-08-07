@@ -1,26 +1,21 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
-set "BUILD_NO_PAUSE=0"
-set "BUILD_SKIP_PACKAGE=0"
+set "INSTALL_NO_PAUSE=0"
 
 :parse_args
 if "%~1"=="" goto :args_done
-if /I "%~1"=="--no-pause" set "BUILD_NO_PAUSE=1"
-if /I "%~1"=="/no-pause" set "BUILD_NO_PAUSE=1"
-if /I "%~1"=="--skip-package" set "BUILD_SKIP_PACKAGE=1"
-if /I "%~1"=="/skip-package" set "BUILD_SKIP_PACKAGE=1"
+if /I "%~1"=="--no-pause" set "INSTALL_NO_PAUSE=1"
+if /I "%~1"=="/no-pause" set "INSTALL_NO_PAUSE=1"
 shift
 goto :parse_args
 
 :args_done
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "LIBRARY_DIRECTORY=%PROJECT_ROOT%\.native\lib"
-set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
-set "DISTRIBUTION_DIRECTORY=%PROJECT_ROOT%\dist"
-set "PACKAGE_NAME=local-stt-windows-x64"
-set "PACKAGE_DIRECTORY=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%"
-set "ARCHIVE_PATH=%DISTRIBUTION_DIRECTORY%\%PACKAGE_NAME%.zip"
+set "TARGET_DIRECTORY=%PROJECT_ROOT%\target"
+set "RELEASE_DIRECTORY=%TARGET_DIRECTORY%\release"
+set "BINARY=%RELEASE_DIRECTORY%\local-stt-rs.exe"
 
 for %%C in (cargo.exe rustc.exe) do (
     where %%C >nul 2>nul
@@ -51,66 +46,58 @@ set "LT_NO_PAUSE=1"
 call "%~dp0resolve-windows-lock.cmd"
 set "RC=!ERRORLEVEL!"
 call :restore_pause_setting
-if not "!RC!"=="0" goto :build_fail
+if not "!RC!"=="0" goto :install_fail
 
 set "SAVED_NO_PAUSE=%LT_NO_PAUSE%"
 set "LT_NO_PAUSE=1"
 call "%~dp0prepare-sherpa-runtime.cmd"
 set "RC=!ERRORLEVEL!"
 call :restore_pause_setting
-if not "!RC!"=="0" goto :build_fail
+if not "!RC!"=="0" goto :install_fail
 
 set "SHERPA_ONNX_LIB_DIR=%LIBRARY_DIRECTORY%"
 echo.
 echo ==^> Building the Windows release
-cargo.exe build -p local-transcriber-windows --release --locked
+cargo.exe build -p local-transcriber-windows --release --locked --target-dir "%TARGET_DIRECTORY%"
 if errorlevel 1 (
     set "RC=!ERRORLEVEL!"
     if "!RC!"=="0" set "RC=1"
     echo ERROR: The Windows release build failed.
-    goto :build_fail
+    goto :install_fail
+)
+
+if not exist "%BINARY%" (
+    echo ERROR: Cargo completed, but the Windows release executable was not created at:
+    echo   %BINARY%
+    set "RC=1"
+    goto :install_fail
 )
 
 copy /y "%LIBRARY_DIRECTORY%\*.dll" "%RELEASE_DIRECTORY%\" >nul
 if errorlevel 1 (
     echo ERROR: The verified Sherpa runtime DLLs could not be copied beside the executable.
     set "RC=1"
-    goto :build_fail
-)
-
-if "%BUILD_SKIP_PACKAGE%"=="0" (
-    echo.
-    echo ==^> Creating the Windows distribution folder and ZIP
-    set "SAVED_NO_PAUSE=%LT_NO_PAUSE%"
-    set "LT_NO_PAUSE=1"
-    call "%~dp0package-windows.cmd" --skip-build --no-pause
-    set "RC=!ERRORLEVEL!"
-    call :restore_pause_setting
-    if not "!RC!"=="0" goto :build_fail
+    goto :install_fail
 )
 
 popd
 echo.
 echo ============================================================
-echo Windows installation, build, and packaging completed.
+echo Windows installation and build completed successfully.
 echo.
 echo Release executable:
-echo   %RELEASE_DIRECTORY%\local-stt-rs.exe
-if "%BUILD_SKIP_PACKAGE%"=="0" (
-    echo.
-    echo Distribution folder:
-    echo   %PACKAGE_DIRECTORY%
-    echo Distribution ZIP:
-    echo   %ARCHIVE_PATH%
-)
+echo   %BINARY%
 echo.
 echo Next, run the application with:
 echo   %~dp0run-windows.cmd
+echo.
+echo To create the top-level dist folder and ZIP, run:
+echo   %~dp0package-windows.cmd
 echo ============================================================
-if "%BUILD_NO_PAUSE%"=="0" (
+if "%INSTALL_NO_PAUSE%"=="0" (
     echo.
-    set "BUILD_DONE="
-    set /p "BUILD_DONE=Press Enter to close this window..."
+    set "INSTALL_DONE="
+    set /p "INSTALL_DONE=Press Enter to close this window..."
 )
 exit /b 0
 
@@ -123,14 +110,14 @@ if defined SAVED_NO_PAUSE (
 set "SAVED_NO_PAUSE="
 exit /b 0
 
-:build_fail
+:install_fail
 popd
 
 :fail
 if not defined RC set "RC=1"
-if "%BUILD_NO_PAUSE%"=="0" (
+if "%INSTALL_NO_PAUSE%"=="0" (
     echo.
-    echo Windows build failed with exit code !RC!.
+    echo Windows installation/build failed with exit code !RC!.
     echo Review the error above, then press any key to close this window.
     pause >nul
 )

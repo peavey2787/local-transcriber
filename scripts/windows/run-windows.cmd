@@ -2,18 +2,19 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
-set "APP_DIRECTORY=%PROJECT_ROOT%\dist\local-stt-windows-x64"
-set "BINARY=%APP_DIRECTORY%\local-stt.exe"
+set "APP_DIRECTORY=%PROJECT_ROOT%\target\release"
+set "BINARY=%APP_DIRECTORY%\local-stt-rs.exe"
 
 if not exist "%BINARY%" (
-    echo ERROR: The packaged Windows application is missing.
-    echo Run scripts\windows\build-windows.cmd first.
+    echo ERROR: The Windows release executable is missing.
+    echo Run scripts\windows\install-windows.cmd first.
     set "RC=1"
     goto :fail
 )
 for %%F in (sherpa-onnx-c-api.dll onnxruntime.dll) do (
     if not exist "%APP_DIRECTORY%\%%F" (
-        echo ERROR: %%F is missing from the Windows distribution folder. Rebuild the application.
+        echo ERROR: %%F is missing beside the Windows release executable.
+        echo Run scripts\windows\install-windows.cmd again.
         set "RC=1"
         goto :fail
     )

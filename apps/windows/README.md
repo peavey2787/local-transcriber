@@ -17,17 +17,18 @@ recording began and pastes the result there.
 
 The application and bundled Sherpa runtime currently target Windows x64 only.
 
-## Build and run
+## Install/build and run
 
 From PowerShell at the repository root:
 
 ```powershell
-.\scripts\windows\build-windows.cmd
+.\scripts\windows\install-windows.cmd
 .\scripts\windows\run-windows.cmd
 ```
 
-The build script downloads the pinned Windows Sherpa/ONNX runtime, verifies its
-SHA-256, validates `Cargo.lock`, and creates a release build. It never requests
+The install script downloads the pinned Windows Sherpa/ONNX runtime, verifies its
+SHA-256, validates `Cargo.lock`, and creates a release build. It does not create
+a distribution package; packaging remains a separate explicit step. It never requests
 administrator access. The repository uses native `.cmd` entrypoints, so Windows
 PowerShell execution policy and script signatures are not involved.
 
@@ -137,8 +138,10 @@ unit tests, and the release build.
 .\scripts\windows\package-windows.cmd
 ```
 
-The distributable archive is written to
-`dist\local-stt-windows-x64.zip`. It contains the application, required runtime
-DLLs, the runtime verification receipt, and the project documentation.
+Run `install-windows.cmd` first. The package command then writes the unpacked
+application to `dist\local-stt-windows-x64\` and the matching archive to
+`dist\local-stt-windows-x64.zip`. The package contains the executable, required
+runtime DLLs, the runtime verification receipt, and project documentation. It
+does not include a redundant launcher; start `local-stt.exe` directly.
 
 See [`SECURITY.md`](SECURITY.md) for the microphone, integrity, and network boundaries.

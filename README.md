@@ -69,7 +69,7 @@ session notes, auditing, and packaging.
 From PowerShell:
 
 ```powershell
-.\scripts\windows\build-windows.cmd
+.\scripts\windows\install-windows.cmd
 .\scripts\windows\run-windows.cmd
 ```
 

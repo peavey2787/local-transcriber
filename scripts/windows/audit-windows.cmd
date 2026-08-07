@@ -3,7 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "LIBRARY_DIRECTORY=%PROJECT_ROOT%\.native\lib"
-set "RELEASE_DIRECTORY=%PROJECT_ROOT%\target\release"
+set "TARGET_DIRECTORY=%PROJECT_ROOT%\target"
+set "RELEASE_DIRECTORY=%TARGET_DIRECTORY%\release"
 
 for %%C in (cargo.exe rustfmt.exe cargo-clippy.exe) do (
     where %%C >nul 2>nul
@@ -45,17 +46,17 @@ if not "!RC!"=="0" goto :audit_fail
 
 echo.
 echo ==^> Clippy with warnings denied
-cargo.exe clippy -p transcriber-core -p transcriber-ui -p local-transcriber-windows --all-targets --locked --offline -- -D warnings
+cargo.exe clippy -p transcriber-core -p transcriber-ui -p local-transcriber-windows --all-targets --locked --offline --target-dir "%TARGET_DIRECTORY%" -- -D warnings
 if errorlevel 1 goto :cargo_fail
 
 echo.
 echo ==^> Unit tests
-cargo.exe test -p transcriber-core -p transcriber-ui -p local-transcriber-windows --all-targets --locked --offline
+cargo.exe test -p transcriber-core -p transcriber-ui -p local-transcriber-windows --all-targets --locked --offline --target-dir "%TARGET_DIRECTORY%"
 if errorlevel 1 goto :cargo_fail
 
 echo.
 echo ==^> Release build
-cargo.exe build -p local-transcriber-windows --release --locked --offline
+cargo.exe build -p local-transcriber-windows --release --locked --offline --target-dir "%TARGET_DIRECTORY%"
 if errorlevel 1 goto :cargo_fail
 
 copy /y "%LIBRARY_DIRECTORY%\*.dll" "%RELEASE_DIRECTORY%\" >nul

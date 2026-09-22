@@ -5,10 +5,10 @@ for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 set "RUNTIME_ROOT=%PROJECT_ROOT%\.native"
 set "CACHE_DIRECTORY=%RUNTIME_ROOT%\cache"
 set "LIBRARY_DIRECTORY=%RUNTIME_ROOT%\lib"
-set "RELEASE=1.13.4"
+set "RELEASE=1.13.8"
 set "ARCHIVE_NAME=sherpa-onnx-v%RELEASE%-win-x64-shared-MT-Release-lib.tar.bz2"
 set "ARCHIVE_URL=https://github.com/k2-fsa/sherpa-onnx/releases/download/v%RELEASE%/%ARCHIVE_NAME%"
-set "ARCHIVE_SHA256=f923e5eacb6bca83914d89cb31afa579e11eeaff9af39f8ead82ad19f44b2c9f"
+set "ARCHIVE_SHA256=b8eedf41bd6d3779218887b48367bb7a3ece5aaa7667f01f69ee823a12b0a9e7"
 set "ARCHIVE_PATH=%CACHE_DIRECTORY%\%ARCHIVE_NAME%"
 set "PARTIAL_PATH=%ARCHIVE_PATH%.part"
 set "RECEIPT_PATH=%RUNTIME_ROOT%\runtime.sha256"
@@ -24,7 +24,7 @@ if /I not "!NATIVE_ARCH!"=="AMD64" if /I not "!NATIVE_ARCH!"=="X86_64" (
     goto :fail
 )
 
-for %%C in (curl.exe certutil.exe tar.exe) do (
+for %%C in (curl.exe certutil.exe tar.exe powershell.exe) do (
     where %%C >nul 2>nul
     if errorlevel 1 (
         echo ERROR: %%C is required on Windows 10 or Windows 11.
@@ -40,13 +40,15 @@ if errorlevel 1 (
     goto :fail
 )
 
+echo Expected Sherpa runtime SHA-256: !ARCHIVE_SHA256!
+
 if exist "%ARCHIVE_PATH%" (
     call :sha256 "%ARCHIVE_PATH%" ACTUAL_HASH
     if errorlevel 1 (
         echo WARNING: Could not hash the cached Sherpa runtime; discarding it.
         del /f /q "%ARCHIVE_PATH%" >nul 2>nul
     ) else (
-        if /I not "!ACTUAL_HASH!"=="%ARCHIVE_SHA256%" (
+        if /I not "!ACTUAL_HASH!"=="!ARCHIVE_SHA256!" (
             echo WARNING: Discarding the cached Sherpa runtime because its SHA-256 is incorrect.
             del /f /q "%ARCHIVE_PATH%" >nul 2>nul
         )
@@ -71,9 +73,9 @@ if not exist "%ARCHIVE_PATH%" (
         set "RC=1"
         goto :fail
     )
-    if /I not "!ACTUAL_HASH!"=="%ARCHIVE_SHA256%" (
+    if /I not "!ACTUAL_HASH!"=="!ARCHIVE_SHA256!" (
         echo ERROR: Sherpa/ONNX runtime SHA-256 verification failed.
-        echo Expected: %ARCHIVE_SHA256%
+        echo Expected: !ARCHIVE_SHA256!
         echo Actual:   !ACTUAL_HASH!
         set "RC=1"
         goto :fail
@@ -92,7 +94,7 @@ if errorlevel 1 (
     set "RC=1"
     goto :fail
 )
-if /I not "!ACTUAL_HASH!"=="%ARCHIVE_SHA256%" (
+if /I not "!ACTUAL_HASH!"=="!ARCHIVE_SHA256!" (
     echo ERROR: The cached Sherpa/ONNX runtime failed SHA-256 verification.
     set "RC=1"
     goto :fail
@@ -140,14 +142,14 @@ if errorlevel 1 (
 
 > "%RECEIPT_PATH%" (
     echo archive=%ARCHIVE_NAME%
-    echo sha256=%ARCHIVE_SHA256%
+    echo sha256=!ARCHIVE_SHA256!
     echo source=%ARCHIVE_URL%
 )
 
 if exist "%TEMPORARY_DIRECTORY%" rmdir /s /q "%TEMPORARY_DIRECTORY%" >nul 2>nul
 echo Verified Sherpa/ONNX runtime ready at:
 echo   %LIBRARY_DIRECTORY%
-echo SHA-256: %ARCHIVE_SHA256%
+echo SHA-256: !ARCHIVE_SHA256!
 exit /b 0
 
 :sha256

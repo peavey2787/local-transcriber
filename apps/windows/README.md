@@ -46,8 +46,11 @@ The application validates and registers the captured combination immediately.
 Every setting is persisted as soon as it changes; there is no Save or Apply
 button.
 
-If another application owns the shortcut, local-stt remains open with recording
-disabled and directs you to choose another shortcut in Settings.
+Windows shortcuts are observed without reserving them with `RegisterHotKey`, so a
+shortcut can still be used if another application registered the same combination.
+The trigger key itself is consumed while the shortcut is active; single-key shortcuts
+such as backquote or minus therefore do not type a stray character into the focused
+editor before the transcription is delivered.
 
 Settings are stored at `%APPDATA%\local-stt\config.json`.
 

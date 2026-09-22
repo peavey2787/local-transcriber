@@ -177,7 +177,7 @@ impl LocalSttApp {
         if let Err(error) = self.hotkeys.rebind(&requested) {
             self.settings.hotkey.clone_from(&self.config.hotkey);
             return Err(format!(
-                "{error}. The existing recording shortcut remains active; choose another shortcut."
+                "{error:#}. The existing recording shortcut remains active; choose another shortcut."
             ));
         }
 

@@ -25,12 +25,11 @@ an interrupted write does not leave partially serialized JSON active.
 
 The native Sherpa/ONNX archive is pinned to:
 
-- Release: `1.13.4`
-- Asset: `sherpa-onnx-v1.13.4-win-x64-shared-MT-Release-lib.tar.bz2`
-- SHA-256: `f923e5eacb6bca83914d89cb31afa579e11eeaff9af39f8ead82ad19f44b2c9f`
+- Release: `1.13.8`
+- Asset: `sherpa-onnx-v1.13.8-win-x64-shared-MT-Release-lib.tar.bz2`
+- SHA-256: `b8eedf41bd6d3779218887b48367bb7a3ece5aaa7667f01f69ee823a12b0a9e7`
 
-`scripts\windows\prepare-sherpa-runtime.cmd` rejects any archive whose digest differs
-before extraction. Build, audit, and package scripts supply the verified
+`scripts\windows\prepare-sherpa-runtime.cmd` uses the pinned SHA-256 for the exact v1.13.8 release asset and rejects any downloaded or cached archive whose digest differs before extraction. Build, audit, and package scripts supply the verified
 project-local runtime through `SHERPA_ONNX_LIB_DIR`, preventing the dependency
 build from choosing or downloading another native archive.
 
@@ -46,8 +45,7 @@ expected files are present.
 
 ## Dependency lock
 
-`Cargo.lock` is committed. Build and release scripts use `--locked`, so Cargo
-must use the exact dependency graph and registry checksums in that file.
+`Cargo.lock` is committed. The Windows installer first validates it against the current manifests and regenerates it when dependency pins have changed; the subsequent build uses `--locked`.
 
 ## Expected network activity
 
